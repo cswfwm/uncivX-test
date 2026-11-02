@@ -4,7 +4,6 @@ import com.unciv.logic.github.GithubAPI
 import com.unciv.logic.github.GithubAPI.downloadAndExtract
 import com.unciv.models.ruleset.RulesetCache
 import com.unciv.utils.Concurrency
-import com.unciv.utils.launchOnGLThread
 
 /**
  * Mod download queue shared by the console and its download list.
@@ -44,7 +43,7 @@ object ModDownloads {
     }
 
     private fun notifyChanged() {
-        launchOnGLThread { onChange?.invoke() }
+        Concurrency.runOnGLThread { onChange?.invoke() }
     }
 
     private fun startNext() {
