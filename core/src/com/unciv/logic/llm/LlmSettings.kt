@@ -14,8 +14,8 @@ class LlmSettings {
     var apiKey: String = ""
     var model: String = "gpt-4o-mini"
 
-    /** Master switch for the in-game floating panel. */
-    var enabled: Boolean = false
+    /** Master switch for the in-game floating panel; on by default so the orb is always reachable. */
+    var enabled: Boolean = true
 
     /** Whether the AI plans each turn automatically, or only when the panel button is pressed. */
     var autoPlayEachTurn: Boolean = false

@@ -157,32 +157,28 @@ class LlmPanel(private val worldScreen: WorldScreen) : Table() {
     }
 
     private fun buildOrb() {
-        val orbGroup = Group()
-        orbGroup.setSize(ORB_SIZE, ORB_SIZE)
-
-        val circle = ImageGetter.getCircle(Color(0.12f, 0.12f, 0.12f, 0.92f), ORB_SIZE)
-        circle.setPosition(0f, 0f)
-        orbGroup.addActor(circle)
+        val orb = Table()
+        orb.background = ImageGetter.getDrawable(ImageGetter.circleLocation)
+        orb.setSize(ORB_SIZE, ORB_SIZE)
 
         val label = Label("AI", BaseScreen.skin).apply {
             color = Color.GOLD
             setAlignment(Align.center)
-            setSize(ORB_SIZE, ORB_SIZE)
         }
-        orbGroup.addActor(label)
+        orb.add(label).expand().center()
 
         // Swallow touches so a tap near the orb cannot reach the map underneath.
-        orbGroup.touchable = Touchable.enabled
-        orbGroup.onClick {
+        orb.touchable = Touchable.enabled
+        orb.onClick {
             expanded = true
             rebuild()
         }
 
-        add(orbGroup).size(ORB_SIZE).row()
+        add(orb).size(ORB_SIZE).row()
         pack()
         width = ORB_SIZE
         height = ORB_SIZE
-        installDrag(orbGroup)
+        installDrag(orb)
     }
 
     private fun buildHeader() {
