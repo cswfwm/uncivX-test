@@ -5,4 +5,10 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - run: echo hello
+      - uses: actions/checkout@v4
+      - name: Restore keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.CI_KEYSTORE_BASE64 }}
+        run: |
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          ls -l "$RUNNER_TEMP/release.jks"
