@@ -96,7 +96,7 @@ internal class LlmTab(
 
     /** Import an existing multiplayer player ID from the clipboard, reusing the game's own flow. */
     private fun addPlayerIdImport() {
-        addHeader("玩家 ID"
+        addHeader("玩家 ID")
 
         val idLabel = "".toLabel()
         addWrapped {
