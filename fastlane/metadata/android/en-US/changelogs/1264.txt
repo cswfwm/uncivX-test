@@ -1,7 +1,0 @@
-Massive rendering lag improvement!!
-
-ANRs reduction when switching screens
-
-By SomeTroglodyte:
-- Disallow spectators to rename units
-- Allow unit rename to "reset" to base unit name

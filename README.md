@@ -1,137 +1,80 @@
-# Unciv - Civ V remake for Android & Desktop
+# uncivCN-X
 
-![](/extraImages/GithubPreviewImage.jpg)
+一个基于 [UncivCN（文明战争中文社区版）](https://github.com/AutumnPizazz/Unciv) 的 Android 客户端分支，
+在中文社区版的基础上增加了由大语言模型驱动的**AI 玩家代理**功能。
 
-[![Google Play](https://img.shields.io/static/v1?label=Google&message=Play&logo=google-play)](https://play.google.com/store/apps/details?id=com.unciv.app)
-[![F-Droid](https://img.shields.io/f-droid/v/com.unciv.app?logo=f-droid)](https://f-droid.org/en/packages/com.unciv.app/)
-[![itch.io](https://img.shields.io/static/v1?label=itch.io&message=Unciv&color=607D8B&logo=itch.io)](https://yairm210.itch.io/unciv)
-[![Flathub](https://img.shields.io/flathub/v/io.github.yairm210.unciv?logo=flathub)](https://flathub.org/apps/details/io.github.yairm210.unciv)
-[![AUR](https://img.shields.io/aur/version/unciv-bin?logo=arch-linux)](https://aur.archlinux.org/packages/unciv-bin)
-[![pi-apps](https://img.shields.io/badge/dynamic/json?color=c51a4a&label=Pi-Apps&logo=raspberry-pi&query=%24.Unciv.Version&url=https%3A%2F%2Fraw.githubusercontent.com%2FBotspot%2Fpi-apps-analytics%2Fmain%2Fpackage_data_v2.json)](https://github.com/Botspot/pi-apps)
-![Brew](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fformulae.brew.sh%2Fapi%2Fformula%2Funciv.json&query=%24.versions.stable&logo=homebrew&label=Brew)
-[![Chocolatey](https://img.shields.io/chocolatey/v/unciv?logo=chocolatey)](https://community.chocolatey.org/packages/unciv)
-[![scoop-games](https://img.shields.io/scoop/v/unciv?bucket=games)](https://github.com/Calinou/scoop-games)
- 
-[![Build status](https://github.com/yairm210/Unciv/actions/workflows/buildAndTest.yml/badge.svg)](https://github.com/yairm210/Unciv/actions/workflows/buildAndTest.yml)
-[![Discord](https://img.shields.io/discord/586194543280390151?color=%237289DA&logo=discord&logoColor=%23FFFFFF)](https://discord.gg/bjrB4Xw)
+当前版本 **V1.0.0**，仅提供 **Android** 构建，目标为 Android 5.1 (API 21) 及以上，包含 32 位 `armeabi-v7a` 与 64 位 `arm64-v8a`。
 
+## 来源声明
 
-## What is this?
+本项目**不是** Unciv 官方版本，也不是文明战争中文社区版的官方发布。
 
-An open source, moddability-focused Android and Desktop remake of Civ V, made with [LibGDX](https://github.com/libgdx/libgdx).
+- 上游游戏：Unciv，作者 [yairm210](https://github.com/yairm210/Unciv)，许可证 MPL-2.0
+- 中文社区版：UncivCN，作者 [AutumnPizazz](https://github.com/AutumnPizazz/Unciv)，许可证 MPL-2.0
+- 本项目在其源码上修改，修改部分同样以 MPL-2.0 发布，详见 [LICENSE](LICENSE)
 
-## Is this any good?
+游戏本体、美术、音乐与规则数据的版权归各自作者所有。本仓库只包含源码与构建配置，
+不包含原版的商店页面、社区渠道或官方下载地址。
 
-Depends what you're looking for. If you're in the market for high-res graphics, amazing soundtracks, animations etc, I highly recommend Firaxis's Civ-V-like game, "Civilization V".
+## 增加的功能
 
-If you want a small, fast, moddable, FOSS, in-depth 4X that can still run on a potato, you've come to the right place :)
+| 功能 | 说明 |
+|---|---|
+| AI 托管 | 右侧悬浮球展开后可让 AI 操作当前回合，支持“定方向”与“逐项”两种粒度 |
+| 中转站接入 | 设置页填写 OpenAI 兼容地址、Key、模型名，三项支持从剪贴板粘贴，带连接测试 |
+| 全图输入 | 独立开关，把完整地图同时提供给 AI 与本地显示，不修改调试开关，不影响内置 AI 判定 |
+| 敌方雷达 | 在地图上标出敌方单位位置，不受探索范围限制 |
+| 单位名称 | 可切换在地图上显示单位名称 |
+| 敌方兵力 | 悬浮球面板显示交战方的军事与平民单位数量 |
+| AI 问答 | 独立对话框，可就当前局势提问，每次提问自动附带完整局面 |
+| 宣战确认 | AI 判定要开战时先征求玩家同意 |
+| 音乐播放器 | 可导入本地音乐、管理歌单，支持 mp3/ogg/flac/m4a/opus 等格式 |
+| 错误日志 | 出错弹出可滚动、可一键复制的完整堆栈窗口 |
 
-## How do I install?
+## 构建
 
-- **Android** - [Google Play](https://play.google.com/store/apps/details?id=com.unciv.app) or [F-droid](https://f-droid.org/en/packages/com.unciv.app/)
-- **Linux** - [itch.io](https://yairm210.itch.io/unciv), Flatpak via [Flathub](https://flathub.org/apps/details/io.github.yairm210.unciv), or [AUR](https://aur.archlinux.org/packages/unciv-bin)
-- **Windows** - [Grab the MSI](https://github.com/yairm210/Unciv/releases/latest/download/Unciv.msi), or get from [itch.io](https://yairm210.itch.io/unciv), [Chocolatey](https://community.chocolatey.org/packages/unciv), or [Scoop](https://github.com/Calinou/scoop-games)
-- **Raspberry Pi** - [Pi-apps](https://github.com/Botspot/pi-apps)
-- **MacOS** - Via [Brew](https://brew.sh/) (`brew update && brew install unciv`) or install [with this guide](https://yairm210.github.io/Unciv/Other/Installing-on-macOS/) 
-- Jars, APKs and Windows/Linux builds also available in [Releases](https://github.com/yairm210/Unciv/releases) (run jar with `java -jar Unciv.jar`) - *not recommended* since we update frequently and you will quickly become out-of-date
-- [Build from scratch](https://yairm210.github.io/Unciv/Developers/Building-Locally/#without-android-studio) if that's your thing
+仓库自带 GitHub Actions 工作流 [.github/workflows/build-ai-apk.yml](.github/workflows/build-ai-apk.yml)，
+推送到 `main` 即自动构建：
 
-## What's the roadmap?
+1. 编译 `:android:assembleRelease`
+2. 产物写入 `release/`，仅保留最近 5 个 APK
+3. 同步创建 GitHub Release 并上传附件，供应用内更新检查
 
-In this order:
+签名使用仓库内固定的密钥（`signing/keystore.b64`），因此相邻版本可以直接覆盖安装。
 
-* Polish!
-    * UI+UX improvements ([suggestions welcome!](https://github.com/yairm210/Unciv/issues/new?assignees=&labels=feature&template=feature_request.md&title=Feature+request%3A+))
-    * Better automation, AI etc. in-game
-* G&K mechanics - see [#4697](https://www.github.com/yairm210/Unciv/issues/4697)
-* BNW mechanics - trade routes, world congress, etc.
+### 本地构建
 
-## Contributing
+需要 JDK 17、Gradle 9.4.1、Android SDK（compileSdk 36、build-tools 36.0.0）：
 
-Programmers start [here](https://yairm210.github.io/Unciv/Developers/Building-Locally/)!
+```bash
+echo "sdk.dir=/path/to/android-sdk" > local.properties
+./gradlew :android:assembleRelease
+```
 
-Translators start [here](https://yairm210.github.io/Unciv/Translating/Translating/)! Language completion status [here](https://github.com/yairm210/Unciv/blob/master/android/assets/jsons/translations/completionPercentages.properties) 
+产物：`android/build/outputs/apk/release/*.apk`
 
-Modders start [here](https://yairm210.github.io/Unciv/Modders/Mods/)!
+## 代码位置
 
-You can join us in any of the open issues, or work on improving anything you want - once you're finished, issue a pull request and it'll go into the next version!
+新增代码集中在两处：
 
-If not, you can help by spreading the word - vote for Unciv where you can, mention it on Reddit or Twitter etc, and help us with new ideas of how to get the word out!
+- `core/src/com/unciv/logic/llm/` — 设置、中转站客户端、局面序列化、回合决策、敌方兵力统计、宣战队列
+- `core/src/com/unciv/logic/music/` — 音乐播放器
+- `core/src/com/unciv/ui/screens/worldscreen/view/` — 悬浮球、AI 问答、音乐播放器、错误日志窗口
 
+对上游文件的改动点：`GameSettings`（设置字段）、`UncivGame`（启动加载设置）、`TileView` / `CivView` /
+`Civilization` / `ForeignCityView`（全图可见性）、`OptionsPopupPages` / `OptionsPopup`（设置页签）、
+`TileLayerUnitSprite`（雷达与单位名称）、`DeclareWarTargetAutomation`（宣战前询问）、
+`PlatformSpecific` / `AndroidGame`（播放与键盘）、`Constants` / `UpdateChecker`（更新来源）。
 
-## FAQ
+## 已知限制
 
-### How about iOS?
+- AI 只执行当前回合，不会代替玩家结束回合，也不会代替玩家上传联机存档
+- 设置中的 API Key 仅保存在本地设置文件，不写入存档，不随联机上传
+- 全图开关只改变显示与 AI 输入，不修改存档数据
+- 仓库内包含固定签名密钥，任何人可据此产出同包名安装包；如介意请自行替换 `signing/keystore.b64`
 
-I'm not planning on it. It means paying money to Apple, yet another release path, and since I don't have an iOS device it means I can't test it properly.
+## 许可证
 
-### Steam release?
+本项目遵循 **Mozilla Public License 2.0**，与上游一致。完整条款见 [LICENSE](LICENSE)。
 
-Steam has decided that they don't want to host Unciv, they probably don't want to risk legal issues with Firaxis (although those should be non-existent, see below).
- 
-### Will you implement {feature}?
-
-If it's in the original Civ V, then yes!
-
-If not, then the feature won't be added to the base game - possibly it will be added as a way to mod the game, which is constantly expanding.
-
-#### Why not? This is its own game, why not add features that weren't in Civ V?
-
-Having a clear vision is important for actually getting things done.
-
-Anyone can make a suggestion. Not all are good, viable, or simple. Not many can actually implement stuff.
-
-As an open source project, this stuff is done in our spare time, of which there isn't much.
-
-We need a clear-cut criteria to decide what to work on and what not to work on.
-
-#### Will you implement Civ VI?
-
-Considering how long it took to get this far, no.
-
-### How can I learn to play? Where's the wiki?
-
-All the tutorial information is available in-game at menu > civilopedia > tutorials
-
-All the information is included in the amazing [Civ V wiki](https://civilization.fandom.com/wiki/)
-
-Since this is a Civ V clone, you can search Google for how to play Civ V and there are loads of answers =)
-
-Alternatively, you could [join us on Discord](https://discord.gg/bjrB4Xw) and ask there =D
-
-### Aren't you basically making a Civ V clone? Is that even legal?
-
-According to the [US Copyright Office FL-108](https://upload.wikimedia.org/wikipedia/commons/9/96/U.S._Copyright_Office_fl108.pdf), intellectual property rights *do not* apply to mechanics - as I'm sure you know, there are a billion Flappy Bird knockoffs.
-
-It is definitely illegal:
- - To use any assets from the original game (images, sound etc) - they belong to Firaxis
-
-It is probably illegal (no solid sources on this):
- - To use the Civilization name
- - To impersonate the Civ games (so calling yourself civi|zation with a similar logo, for instance)
-
-Interestingly, [Civilization is a registered trademark](https://tsdr.uspto.gov/#caseNumber=74166752&caseType=SERIAL_NO&searchType=statusSearch), but it looks like it's only *that particular logo* which is trademarked, so technically you could make another game called "Civilization" and it'll stick. In any case we're not going there :) 
-
-## Run with Docker [![Docker](https://github.com/yairm210/Unciv/actions/workflows/dockerPublish.yml/badge.svg)](https://github.com/yairm210/Unciv/actions/workflows/dockerPublish.yml)
-
-If you have docker compose installed:
-
- ```$ docker compose build && docker compose up```
-
-and then goto http://localhost:6901/vnc.html?password=headless
-
-If just docker:
-
-```$ docker build . -t unciv && docker run -d -p 6901:6901 -p 5901:5901 unciv  ```
-
-Or just use our already built one:
-
-```$ docker run -d -p 6901:6901 -p 5901:5901 ghcr.io/yairm210/unciv ```
-
-and then goto http://localhost:6901/vnc.html?password=headless
-
-## Licensing and credits
-
-This game is available under the MPL 2.0 (see [LICENSE](LICENSE]). The media
-files are authored by many people, available under a mix of CC BY-SA 4.0,
-CC BY 3.0/4.0, CC0, Public Domain (see [docs/Credits.md](docs/Credits.md)).
+修改过的源文件继续适用 MPL-2.0；你可以自由使用、修改与再分发，但分发修改后的源码时需一并提供对应源码。
