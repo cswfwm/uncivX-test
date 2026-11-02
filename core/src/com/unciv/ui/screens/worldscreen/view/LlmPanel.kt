@@ -89,36 +89,36 @@ class LlmPanel(private val worldScreen: WorldScreen) : Table() {
 
         buildHeader()
         statusLabel.setText(statusText())
-        add(statusLabel).growX().row()
+        add(statusLabel).width(PANEL_WIDTH - 16f).left().row()
 
         val enemyStrengths = currentCivStrengths()
         enemyLabel.setText(
             if (enemyStrengths.isEmpty()) "敌方兵力：无交战"
             else "敌方兵力：军事 ${enemyStrengths.sumOf { it.military }}" +
                 "，平民 ${enemyStrengths.sumOf { it.civilian }}")
-        add(enemyLabel).growX().row()
+        add(enemyLabel).width(PANEL_WIDTH - 16f).left().row()
 
-        "AI 问答".toTextButton().apply {
+        panelButton("AI 问答").apply {
             onClick { LlmChatPopup(worldScreen, settings).open() }
-        }.also { add(it).growX().row() }
+        }.also { add(it).width(PANEL_WIDTH - 16f).row() }
 
-        "音乐播放器".toTextButton().apply {
+        panelButton("音乐播放器").apply {
             onClick { MusicPlayerPopup(worldScreen).open() }
-        }.also { add(it).growX().row() }
+        }.also { add(it).width(PANEL_WIDTH - 16f).row() }
 
-        "AI 操作本回合".toTextButton().apply {
+        panelButton("AI 操作本回合").apply {
             if (busy) disable()
             onClick { runAiTurn() }
-        }.also { add(it).growX().row() }
+        }.also { add(it).width(PANEL_WIDTH - 16f).row() }
 
         if (lastError != null) {
-            "查看日志".toTextButton().apply {
+            panelButton("查看日志").apply {
                 onClick { ErrorReportPopup(worldScreen, "AI 操作失败", lastError!!).open() }
-            }.also { add(it).growX().row() }
+            }.also { add(it).width(PANEL_WIDTH - 16f).row() }
         }
 
-        (if (settings.granularityOrDefault() == LlmDecisionGranularity.Direction)
-            "粒度：定方向" else "粒度：逐项").toTextButton().apply {
+        panelButton(if (settings.granularityOrDefault() == LlmDecisionGranularity.Direction)
+            "粒度：定方向" else "粒度：逐项").apply {
             onClick {
                 settings.granularity =
                     if (settings.granularityOrDefault() == LlmDecisionGranularity.Direction)
@@ -127,7 +127,7 @@ class LlmPanel(private val worldScreen: WorldScreen) : Table() {
                         LlmDecisionGranularity.Direction.name
                 rebuild()
             }
-        }.also { add(it).growX().row() }
+        }.also { add(it).width(PANEL_WIDTH - 16f).row() }
 
         toggleRow("全图视野", settings.revealMap) {
             LlmSettingsHolder.setRevealMap(it)
@@ -143,10 +143,12 @@ class LlmPanel(private val worldScreen: WorldScreen) : Table() {
         logLabel.wrap = true
         val logScroll = ScrollPane(logLabel, BaseScreen.skin)
         logScroll.setFadeScrollBars(false)
-        add(logScroll).growX().height(LOG_HEIGHT).row()
+        add(logScroll).width(PANEL_WIDTH - 16f).height(LOG_HEIGHT).row()
 
+        // Width is fixed: packing by content would let a long button label or a rebuilt screen
+        // stretch the panel past its own column.
         pack()
-        width = PANEL_WIDTH
+        setWidth(PANEL_WIDTH)
     }
 
     /** Diplomacy is not always ready while the world screen is still being assembled. */
@@ -176,31 +178,36 @@ class LlmPanel(private val worldScreen: WorldScreen) : Table() {
 
         add(orb).size(ORB_SIZE).row()
         pack()
-        width = ORB_SIZE
-        height = ORB_SIZE
+        setSize(ORB_SIZE, ORB_SIZE)
         installDrag(orb)
     }
 
     private fun buildHeader() {
         val header = Table()
         header.add(Label("AI", BaseScreen.skin).apply { color = Color.GOLD }).padRight(6f)
-        "\u25B6".toTextButton().apply {
+        panelButton("\u25B6").apply {
             onClick {
                 expanded = false
                 rebuild()
             }
         }.also { header.add(it).right().expandX() }
-        add(header).growX().row()
+        add(header).width(PANEL_WIDTH - 16f).row()
     }
 
     private fun toggleRow(label: String, current: Boolean, apply: (Boolean) -> Unit) {
-        (if (current) "$label：开" else "$label：关").toTextButton().apply {
+        panelButton(if (current) "$label：开" else "$label：关").apply {
             onClick {
                 apply(!current)
                 worldScreen.shouldUpdate = true
                 rebuild()
             }
-        }.also { add(it).growX().row() }
+        }.also { add(it).width(PANEL_WIDTH - 16f).row() }
+    }
+
+    /** Panel buttons never widen the panel: long labels are ellipsized instead. */
+    private fun panelButton(text: String) = text.toTextButton().apply {
+        getLabel().setEllipsis(true)
+        getLabel().setAlignment(Align.center)
     }
 
     private fun rebuild() {
