@@ -233,8 +233,8 @@ class LlmPanel(private val worldScreen: WorldScreen) : Table() {
         val civ = worldScreen.selectedGameView.civView.getCiv()
         ConfirmPopup(
             worldScreen,
-            "AI wants to declare war on [${target.civName}]. Declare war?",
-            "Declare war",
+            "AI 建议对 [${target.civName}] 宣战，是否同意？",
+            "宣战",
             isConfirmPositive = false
         ) {
             civ.getDiplomacyManager(target)?.declareWar()

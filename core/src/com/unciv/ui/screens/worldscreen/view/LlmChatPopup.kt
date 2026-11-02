@@ -36,14 +36,14 @@ class LlmChatPopup(
 
     private val transcript = Table(BaseScreen.skin)
     private val scrollPane = ScrollPane(transcript, BaseScreen.skin)
-    private val inputField = UncivTextField("Ask about this game...")
-    private val sendButton = "Send".toTextButton()
+    private val inputField = UncivTextField("输入你想问的问题…")
+    private val sendButton = "发送".toTextButton()
     private var waiting = false
 
     init {
         transcript.defaults().growX().pad(4f).left()
 
-        add("AI chat".toLabel(fontSize = 26)).left().pad(6f).row()
+        add("AI 问答".toLabel(fontSize = 26)).left().pad(6f).row()
         add(enemySummaryLabel()).colspan(2).left().pad(4f).row()
 
         scrollPane.setFadeScrollBars(false)
@@ -55,7 +55,7 @@ class LlmChatPopup(
         add(inputField).expandX().fillX()
         add(sendButton).padLeft(4f).row()
 
-        addCloseButton("Close")
+        addCloseButton("关闭")
 
         sendButton.onClick { ask() }
         inputField.addListener(object : InputListener() {
