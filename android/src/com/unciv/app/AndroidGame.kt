@@ -97,6 +97,29 @@ class AndroidGame(private val activity: Activity) : UncivGame() {
 
     fun isInitializedProxy() = super.isInitialized
 
+    /**
+     * Show the keyboard with an explicit text input type.
+     *
+     * Without this the platform receives no input type and several IMEs open a password-style
+     * keyboard for ordinary fields such as the API key or the music path.
+     */
+    override fun showTextKeyboard(visible: Boolean): Boolean {
+        val view = (Gdx.graphics as? AndroidGraphics)?.view ?: return false
+        val editText = (view as? android.view.ViewGroup)?.getChildAt(0) as? android.widget.EditText
+            ?: return false
+        editText.inputType = android.text.InputType.TYPE_CLASS_TEXT or
+            android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        val imm = activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+            as? android.view.inputmethod.InputMethodManager
+        if (visible) {
+            editText.requestFocus()
+            imm?.showSoftInput(editText, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+        } else {
+            imm?.hideSoftInputFromWindow(editText.windowToken, 0)
+        }
+        return true
+    }
+
     /** System decoder used for music formats libGDX cannot handle. */
     private var platformPlayer: android.media.MediaPlayer? = null
 

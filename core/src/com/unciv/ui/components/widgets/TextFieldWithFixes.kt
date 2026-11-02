@@ -10,6 +10,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextField
 import com.badlogic.gdx.scenes.scene2d.utils.FocusListener
 import com.unciv.ui.components.input.KeyCharAndCode
 import com.unciv.ui.components.input.keyShortcuts
+import com.unciv.UncivGame
 
 /**
  * Creates a text field with two deviations from the default Gdx [TextField]:
@@ -35,10 +36,22 @@ open class TextFieldWithFixes private constructor(text: String, style: TextField
     init {
         onscreenKeyboard = object : OnscreenKeyboard {
             override fun show(textField: TextField) {
-                Gdx.input.setOnscreenKeyboardVisible(true, if (isPasswordMode) OnscreenKeyboardType.Password else OnscreenKeyboardType.Default)
+                if (isPasswordMode) {
+                    Gdx.input.setOnscreenKeyboardVisible(true, OnscreenKeyboardType.Password)
+                    return
+                }
+                // Let the platform force a normal text keyboard; otherwise some IMEs open a
+                // password-style one for plain fields.
+                if (UncivGame.isCurrentInitialized() && UncivGame.Current.showTextKeyboard(true)) return
+                Gdx.input.setOnscreenKeyboardVisible(true, OnscreenKeyboardType.Default)
             }
             override fun close() {
-                Gdx.input.setOnscreenKeyboardVisible(false, if (isPasswordMode) OnscreenKeyboardType.Password else OnscreenKeyboardType.Default)
+                if (isPasswordMode) {
+                    Gdx.input.setOnscreenKeyboardVisible(false, OnscreenKeyboardType.Password)
+                    return
+                }
+                if (UncivGame.isCurrentInitialized() && UncivGame.Current.showTextKeyboard(false)) return
+                Gdx.input.setOnscreenKeyboardVisible(false, OnscreenKeyboardType.Default)
             }
         }
         addListener(object : FocusListener() {

@@ -11,6 +11,7 @@ import com.unciv.models.Religion
 import com.unciv.ui.screens.civilopediascreen.FormattedLine
 import com.unciv.utils.DebugUtils
 import yairm210.purity.annotations.Readonly
+import com.unciv.logic.llm.LlmSettingsHolder
 
 /** Should contain information that should be knowable to us about foreign cities. Superclass of [CityView]. */
 open class ForeignCityView(internal open val city: City,
@@ -38,6 +39,7 @@ open class ForeignCityView(internal open val city: City,
                 || city.civ == viewer
                 || spyIsSetUpAtCity(viewer)
                 || DebugUtils.VISIBLE_MAP
+                || LlmSettingsHolder.isRevealMapEnabled()
         if (!canSeeCityData) return null
         return gameView.getCityView(city)
     }

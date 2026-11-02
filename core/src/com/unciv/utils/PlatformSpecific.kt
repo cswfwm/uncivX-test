@@ -17,6 +17,15 @@ interface PlatformSpecific {
      */
     fun playAudioFile(path: String, volume: Float, onComplete: () -> Unit): Boolean = false
 
+    /**
+     * Request the on-screen keyboard, overriding the platform default.
+     *
+     * libGDX passes no explicit input type for plain text fields, and some IMEs then fall back to
+     * a password-style keyboard. Platforms that can set an explicit text type should override this
+     * and return `true`; returning `false` keeps libGDX's own handling.
+     */
+    fun showTextKeyboard(visible: Boolean): Boolean = false
+
     /** Stop playback started by [playAudioFile], if any. */
     fun stopAudioFile() {}
 
