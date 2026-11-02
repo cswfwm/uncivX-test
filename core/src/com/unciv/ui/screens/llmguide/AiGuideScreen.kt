@@ -55,8 +55,13 @@ class AiGuideScreen : BaseScreen() {
         scrollPane.setScrollingDisabled(true, false)
         root.add(scrollPane).grow().row()
 
+        val tools = Table()
+        val speedTest = "测试加速源".toTextButton()
+        speedTest.onClick { runSpeedTest(speedTest) }
+        tools.add(speedTest).padRight(8f)
         usageLabel.setText(LlmUsage.summary())
-        root.add(usageLabel).left().row()
+        tools.add(usageLabel).expandX().left()
+        root.add(tools).growX().row()
 
         val inputRow = Table()
         inputRow.add(inputField).growX().padRight(6f)
@@ -86,6 +91,25 @@ class AiGuideScreen : BaseScreen() {
         transcript.add(label).row()
         scrollPane.layout()
         scrollPane.scrollTo(0f, 0f, 0f, 0f)
+    }
+
+    /** Probes every mod mirror from this device and offers to switch to the fastest one. */
+    private fun runSpeedTest(button: com.badlogic.gdx.scenes.scene2d.ui.TextButton) {
+        button.isDisabled = true
+        append("系统", "正在测试各加速源，请稍候…")
+        Concurrency.run("SpeedTest") {
+            val results = com.unciv.logic.llm.DownloadSourceTester.testAll()
+            launchOnGLThread {
+                button.isDisabled = false
+                for (r in results) append("测速", "${r.source.displayName}：${r.detail}")
+                val best = com.unciv.logic.llm.DownloadSourceTester.applyFastest(results)
+                if (best == null) {
+                    append("系统", "所有加速源都无法连接，请检查网络。")
+                } else {
+                    append("系统", "已自动切换到最快的可用源：${best.displayName}")
+                }
+            }
+        }
     }
 
     private fun send() {
