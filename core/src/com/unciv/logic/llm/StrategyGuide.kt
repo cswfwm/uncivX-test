@@ -12,7 +12,7 @@ import com.unciv.models.ruleset.unique.UniqueType
  */
 object StrategyGuide {
 
-    private data class Rule(
+    private class Rule(
         val applies: (StrategyContext) -> Boolean,
         val text: String
     )
@@ -50,30 +50,37 @@ object StrategyGuide {
     }
 
     private val rules = listOf(
-        Rule({ it.isEarlyGame && it.settlerCount == 0 && it.cityCount < 4 }) {
-            "开局首要任务是抢地：尽早产出开拓者并铺城。城市数量决定长期国力，" +
+        Rule(
+            applies = { it.isEarlyGame && it.settlerCount == 0 && it.cityCount < 4 },
+            text = "开局首要任务是抢地：尽早产出开拓者并铺城。城市数量决定长期国力，" +
                 "空地一旦被邻国占据就无法逆转。优先让首都生产开拓者，其次才是兵营类建筑。"
-        },
-        Rule({ it.isEarlyGame && it.militaryCount <= 1 }) {
-            "开局至少保留 1-2 个单位护卫首都与新城市，防止蛮族和突袭。" +
+        ),
+        Rule(
+            applies = { it.isEarlyGame && it.militaryCount <= 1 },
+            text = "开局至少保留 1-2 个单位护卫首都与新城市，防止蛮族和突袭。" +
                 "侦察单位要持续探图，寻找优质城址与邻国方位。"
-        },
-        Rule({ it.settlerCount > 0 }) {
-            "已有开拓者时，优先把它送到有淡水、有奢侈品或战略资源的位置建城，" +
+        ),
+        Rule(
+            applies = { it.settlerCount > 0 },
+            text = "已有开拓者时，优先把它送到有淡水、有奢侈品或战略资源的位置建城，" +
                 "不要长时间滞留原地。"
-        },
-        Rule({ it.isEarlyGame && it.workerCount == 0 && it.cityCount >= 2 }) {
-            "两城之后应尽快产出工人改良地块，落后的人口增长会拖慢一切。"
-        },
-        Rule({ !it.isEarlyGame && it.cityCount <= 3 && !it.isAtWar }) {
-            "中期仍有扩张空间时，继续铺城或吞并城邦，不要过早转入纯内政。"
-        },
-        Rule({ it.isBehindInCities }) {
-            "你的城市数明显少于正常节奏，应把资源倾斜到扩张而不是奇观。"
-        },
-        Rule({ it.isAtWar }) {
-            "战时优先保证军事生产与前线的单位补充，避免在后方堆叠无用的建筑。"
-        }
+        ),
+        Rule(
+            applies = { it.isEarlyGame && it.workerCount == 0 && it.cityCount >= 2 },
+            text = "两城之后应尽快产出工人改良地块，落后的人口增长会拖慢一切。"
+        ),
+        Rule(
+            applies = { !it.isEarlyGame && it.cityCount <= 3 && !it.isAtWar },
+            text = "中期仍有扩张空间时，继续铺城或吞并城邦，不要过早转入纯内政。"
+        ),
+        Rule(
+            applies = { it.isBehindInCities },
+            text = "你的城市数明显少于正常节奏，应把资源倾斜到扩张而不是奇观。"
+        ),
+        Rule(
+            applies = { it.isAtWar },
+            text = "战时优先保证军事生产与前线的单位补充，避免在后方堆叠无用的建筑。"
+        )
     )
 
     /** Rules matching this turn, in priority order. */

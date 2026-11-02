@@ -175,7 +175,7 @@ class AiGuideScreen : BaseScreen() {
     }
 
     private fun confirm(question: String, onAccept: () -> Unit) {
-        val popup = Popup(this, Scrollability.None)
+        val popup = Popup(this, Popup.Scrollability.None)
         val label = Label(question, BaseScreen.skin)
         label.wrap = true
         popup.add(label).width(0.7f * stage.width).row()
@@ -191,7 +191,7 @@ class AiGuideScreen : BaseScreen() {
     }
 
     private fun showError(error: Throwable) {
-        Popup(this, Scrollability.None).apply {
+        Popup(this, Popup.Scrollability.None).apply {
             add("请求失败".toLabel(fontSize = 22)).left().pad(6f).row()
             val text = Label(describe(error), BaseScreen.skin)
             text.wrap = true
