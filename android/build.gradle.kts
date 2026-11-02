@@ -34,7 +34,7 @@ android {
         versionCode = BuildConfig.appCodeNumber
         versionName = BuildConfig.appVersion
 
-        base.archivesName.set("UncivCN")
+        base.archivesName.set("uncivCN-X")
     }
 
     // Had to add this crap for Travis to build, it wanted to sign the app

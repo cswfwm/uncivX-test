@@ -1,4 +1,4 @@
-# UncivX (uncivX-test)
+# uncivCN-X (uncivX-test)
 
 Unciv 的 AI 玩家代理构建。基于 [UncivCN 4.22.4.4](https://github.com/AutumnPizazz/Unciv)（文明战争中文社区版），
 在上游代码上增加了一层由大语言模型驱动的托管功能，可直接编译成 Android 5.1 (API 21) 32 位 APK。
@@ -19,6 +19,8 @@ Unciv 的 AI 玩家代理构建。基于 [UncivCN 4.22.4.4](https://github.com/A
 | 宣战确认 | AI 判定要开战时先弹窗询问，玩家同意才真正宣战 |
 
 ## 构建
+
+应用显示名称为 **uncivCN-X**，包名保持 `com.unciv.app.cn` 不变，因此新版本可以直接覆盖安装旧版。
 
 工作流 [.github/workflows/build-ai-apk.yml](.github/workflows/build-ai-apk.yml) 在 push 到 `main` 时自动构建。
 
