@@ -10,6 +10,7 @@ import com.badlogic.gdx.utils.Align
 import com.unciv.UncivGame
 import com.unciv.logic.llm.ChatHistory
 import com.unciv.logic.llm.LlmClient
+import com.unciv.logic.llm.ModSearch
 import com.unciv.logic.llm.LlmUsage
 import com.unciv.logic.llm.WebSearch
 import com.unciv.ui.components.extensions.toLabel
@@ -125,6 +126,12 @@ class AiGuideScreen : BaseScreen() {
         }
     }
 
+    /** Cheap heuristic: the player is asking the AI to find a mod. */
+    private fun looksLikeModQuery(command: String): Boolean {
+        val keywords = listOf("模组", "mod", "Mod", "MOD", "插件")
+        return keywords.any { command.contains(it) }
+    }
+
     private fun send() {
         val command = inputField.text.trim()
         if (command.isEmpty() || busy) return
@@ -141,6 +148,11 @@ class AiGuideScreen : BaseScreen() {
         Concurrency.run("AiGuide") {
             val reference = if (settings.allowWebSearch && WebSearch.shouldLookUp(command))
                 WebSearch.lookup(command) else null
+            // Real repository search through the configured source (accelerators included) so the
+            // model can name actual mods instead of guessing.
+            val modHits = if (looksLikeModQuery(command)) {
+                ModSearch.search(command)
+            } else emptyList()
             val recent = ChatHistory.all().takeLast(12)
                 .joinToString("\n") { "${it.who}：${it.text}" }
             val prompt = buildString {
@@ -151,6 +163,13 @@ class AiGuideScreen : BaseScreen() {
                 }
                 appendLine("玩家指令：$command")
                 if (reference != null) appendLine("联网参考资料：$reference")
+                if (modHits.isNotEmpty()) {
+                    appendLine("仓库搜索结果（来自你配置的下载源）：")
+                    appendLine(ModSearch.asPromptText(modHits))
+                    appendLine("如果要推荐其中一个，请按 MOD 格式输出；地址必须用上面给出的链接。")
+                } else if (looksLikeModQuery(command)) {
+                    appendLine("仓库搜索结果：没有找到匹配的模组。")
+                }
                 appendLine()
                 appendLine(MOD_AND_SETTINGS_INSTRUCTIONS)
             }
