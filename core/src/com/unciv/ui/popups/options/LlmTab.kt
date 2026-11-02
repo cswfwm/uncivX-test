@@ -29,36 +29,36 @@ internal class LlmTab(
     override fun lateInitialize() {
         top()
 
-        addHeader("AI player")
+        addHeader("AI 托管")
 
-        addCheckbox("Enable AI panel", settings.llm::enabled, updateWorld = true) {
+        addCheckbox("启用 AI 悬浮球", settings.llm::enabled, updateWorld = true) {
             LlmSettingsHolder.loadFromSettings()
         }
 
-        addTextSetting("Relay endpoint", settings.llm.baseUrl) { settings.llm.baseUrl = it }
-        addTextSetting("API key", settings.llm.apiKey) { settings.llm.apiKey = it }
-        addTextSetting("Model", settings.llm.model) { settings.llm.model = it }
+        addTextSetting("中转站地址", settings.llm.baseUrl) { settings.llm.baseUrl = it }
+        addTextSetting("API 密钥", settings.llm.apiKey) { settings.llm.apiKey = it }
+        addTextSetting("模型名称", settings.llm.model) { settings.llm.model = it }
 
-        addCheckbox("AI operates every turn", settings.llm::autoPlayEachTurn)
+        addCheckbox("每回合自动操作", settings.llm::autoPlayEachTurn)
 
-        addCheckbox("Reveal the whole map", settings.llm::revealMap, updateWorld = true) {
+        addCheckbox("显示全图", settings.llm::revealMap, updateWorld = true) {
             LlmSettingsHolder.loadFromSettings()
         }
 
-        addCheckbox("Show enemy radar", settings.llm::showEnemyRadar, updateWorld = true) {
+        addCheckbox("显示敌方雷达", settings.llm::showEnemyRadar, updateWorld = true) {
             LlmSettingsHolder.loadFromSettings()
         }
 
-        addCheckbox("Show unit names", settings.llm::showUnitNames, updateWorld = true) {
+        addCheckbox("显示单位名称", settings.llm::showUnitNames, updateWorld = true) {
             LlmSettingsHolder.loadFromSettings()
         }
 
-        addCheckbox("Ask before declaring war", settings.llm::confirmWarDeclarations)
+        addCheckbox("宣战前询问", settings.llm::confirmWarDeclarations)
 
         addPlayerIdImport()
 
         addWrapped {
-            add("Test connection".toTextButton().apply {
+            add("测试连接".toTextButton().apply {
                 onClick { testConnection() }
             })
         }
@@ -72,8 +72,8 @@ internal class LlmTab(
     private fun addTextSetting(label: String, initial: String, save: (String) -> Unit) {
         val field = UncivTextField(label, initial)
         field.maxLength = 500
-        val pasteButton = "Paste".toTextButton()
-        val saveButton = "Enter".toTextButton()
+        val pasteButton = "粘贴".toTextButton()
+        val saveButton = "保存".toTextButton()
         saveButton.disable()
         field.onChange { if (field.text != initial) saveButton.enable() else saveButton.disable() }
         pasteButton.onClick {
@@ -96,26 +96,26 @@ internal class LlmTab(
 
     /** Import an existing multiplayer player ID from the clipboard, reusing the game's own flow. */
     private fun addPlayerIdImport() {
-        addHeader("Player ID")
+        addHeader("玩家 ID"
 
         val idLabel = "".toLabel()
         addWrapped {
-            add("Take user ID from clipboard".toTextButton().apply {
+            add("从剪贴板导入玩家 ID".toTextButton().apply {
                 onClick {
                     val clipboard = Gdx.app.clipboard.contents?.trim()
                     if (clipboard == null || !clipboard.isUUID()) {
                         idLabel.color = Color.RED
-                        idLabel.setText("Invalid ID!")
+                        idLabel.setText("ID 格式无效！")
                         return@onClick
                     }
                     ConfirmPopup(
                         stage,
-                        "Doing this will reset your current user ID to the clipboard contents - are you sure?",
-                        "Take user ID from clipboard"
+                        "这会把你的玩家 ID 重置为剪贴板中的内容，确定继续吗？",
+                        "确认导入"
                     ) {
                         settings.multiplayer.setUserId(clipboard)
                         idLabel.color = Color.WHITE
-                        idLabel.setText("ID successfully set!")
+                        idLabel.setText("玩家 ID 已设置！")
                     }.open(true)
                 }
             })
@@ -124,12 +124,12 @@ internal class LlmTab(
     }
 
     private fun testConnection() {
-        resultLabel.setText("Testing...")
+        resultLabel.setText("正在测试…")
         val snapshot = settings.llm
         Concurrency.run("LlmTest") {
             val result = LlmClient.complete(snapshot, "Reply with the single word OK.", "ping")
             launchOnGLThread {
-                resultLabel.setText(if (result.isSuccess) "OK" else "Failed: ${result.exceptionOrNull()?.message}")
+                resultLabel.setText(if (result.isSuccess) "连接成功" else "失败：${result.exceptionOrNull()?.message}")
             }
         }
     }

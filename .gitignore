@@ -214,3 +214,4 @@ local.properties
 # Source package that shares its name with an asset folder
 !core/src/com/unciv/ui/components/fonts/
 !core/src/com/unciv/ui/components/fonts/**
+
