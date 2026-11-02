@@ -120,8 +120,9 @@ object LlmTurnPlanner {
             "Decide the strategic direction for this turn: research, policy and overall focus. " +
                 "Fill in only \"research\", \"policy\" and \"reasoning\"."
         else
-            "Decide the full turn yourself: give a build order for every city and a destination " +
-                "for every unit you want to move, identified by its id. Units you omit stay where they are."
+            "Decide the full turn yourself. Give every city a build order: put the unit name in " +
+                "\"build\" when you want more troops. Give a destination for every unit you want " +
+                "to move, identified by its id. Cities and units you omit fall back to a safe default."
         val strategy = buildString {
             appendLine(StrategyGuide.openingDoctrine)
             for (line in advice) appendLine("- $line")
@@ -133,16 +134,42 @@ object LlmTurnPlanner {
     }
 
     /** Cities the model left without a build order still need one, or the turn cannot progress. */
+    /**
+     * Cities the model did not name still need a build order.
+     *
+     * Picks a unit when the empire is short on defence, otherwise falls back to the stock
+     * chooser so growth and infrastructure keep moving.
+     */
     private fun applyRemainingCityProduction(civ: Civilization, applied: MutableList<String>) {
+        val military = civ.units.getCivUnits().count { it.isMilitary() }
+        val needsTroops = military < civ.cities.size * 2
         for (city in civ.cities) {
             if (city.cityConstructions.currentConstructionName().isNotEmpty()) continue
             try {
-                city.cityConstructions.chooseNextConstruction()
-                applied += "${city.name} 自动选择生产"
+                val picked = if (needsTroops) pickMilitaryUnit(city) else null
+                if (picked != null) {
+                    city.cityConstructions.setCurrentConstruction(picked)
+                    applied += "${city.name} 建造 $picked"
+                } else {
+                    city.cityConstructions.chooseNextConstruction()
+                    applied += "${city.name} 自动选择生产"
+                }
             } catch (ex: Exception) {
                 Log.error("No production for ${city.name}: ${ex.message}")
             }
         }
+    }
+
+    /** Cheapest available military unit the city can actually build, or null. */
+    private fun pickMilitaryUnit(city: com.unciv.logic.city.City): String? = try {
+        city.cityConstructions.getConstructableUnits()
+            .filter { it.isMilitary }
+            .filter { unit -> city.cityConstructions.canAddToQueue(unit) }
+            .minByOrNull { it.cost }
+            ?.name
+    } catch (ex: Exception) {
+        Log.debug("No military option for ${city.name}: ${ex.message}")
+        null
     }
 
     private fun reasoningOf(plan: JsonObject): String? =

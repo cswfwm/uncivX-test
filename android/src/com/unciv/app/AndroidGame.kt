@@ -107,18 +107,38 @@ class AndroidGame(private val activity: Activity) : UncivGame() {
         // libGDX wraps the GL surface in a FrameLayout; the EditText lives inside that wrapper,
         // which is reachable from the activity's content view rather than from Gdx.graphics.view.
         val content = activity.findViewById<android.view.View>(android.R.id.content) ?: return false
-        val editText = findEditText(content) ?: return false
-        editText.inputType = android.text.InputType.TYPE_CLASS_TEXT or
-            android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        val editText = findEditText(content)
         val imm = activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
             as? android.view.inputmethod.InputMethodManager
-        if (visible) {
-            editText.requestFocus()
-            imm?.showSoftInput(editText, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
-        } else {
-            imm?.hideSoftInputFromWindow(editText.windowToken, 0)
+
+        if (editText != null) {
+            editText.inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            // IMEs such as iFlytek cache the previous input type; without restarting the input
+            // they keep showing the password layout even after inputType changes.
+            imm?.restartInput(editText)
+            if (visible) {
+                editText.requestFocus()
+                imm?.showSoftInput(editText, android.view.inputmethod.InputMethodManager.SHOW_FORCED)
+            } else {
+                imm?.hideSoftInputFromWindow(editText.windowToken, 0)
+            }
+            return true
         }
-        return true
+
+        // No EditText exists yet (libGDX creates it on demand): ask for the keyboard through
+        // libGDX with the text type after the platform has a chance to build the view.
+        if (visible) {
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                findEditText(content)?.let {
+                    it.inputType = android.text.InputType.TYPE_CLASS_TEXT
+                    imm?.restartInput(it)
+                    it.requestFocus()
+                    imm?.showSoftInput(it, android.view.inputmethod.InputMethodManager.SHOW_FORCED)
+                }
+            }, 60L)
+        }
+        return false
     }
 
     /** libGDX nests its EditText somewhere under the GL view, so search instead of guessing. */
