@@ -53,8 +53,9 @@ object LlmTurnPlanner {
             "Wars are proposed to the player for approval, never declared silently."
         else
             "Wars may be declared directly."
+        val advice = StrategyGuide.adviceFor(civ)
         val answer = LlmClient.complete(
-            settings, SYSTEM_PROMPT, buildPrompt(granularity, state, warPolicy))
+            settings, SYSTEM_PROMPT, buildPrompt(granularity, state, warPolicy, advice))
 
         if (answer.isFailure) {
             val message = answer.exceptionOrNull()?.message ?: "unknown error"
@@ -103,14 +104,26 @@ object LlmTurnPlanner {
             reasoning = reasoningOf(plan))
     }
 
-    private fun buildPrompt(granularity: LlmDecisionGranularity, state: String, warPolicy: String): String {
+    private fun buildPrompt(
+        granularity: LlmDecisionGranularity,
+        state: String,
+        warPolicy: String,
+        advice: List<String>
+    ): String {
         val task = if (granularity == LlmDecisionGranularity.Direction)
             "Decide the strategic direction for this turn: research, policy and overall focus. " +
                 "Fill in only \"research\", \"policy\" and \"reasoning\"."
         else
             "Decide the full turn yourself: give a build order for every city and a destination " +
                 "for every unit you want to move, identified by its id. Units you omit stay where they are."
-        return "$task $warPolicy\n\n$state"
+        val strategy = buildString {
+            appendLine(StrategyGuide.openingDoctrine)
+            for (line in advice) appendLine("- $line")
+        }
+        return "$task $warPolicy\n\n" +
+            "战略参考（按本局形势筛选）：\n$strategy\n" +
+            "注意：情报中的「正在研发」是当前已投入的科技，不要改动它；" +
+            "只有当「正在研发」为空时，才在 research 字段指定新科技。\n\n$state"
     }
 
     /** Cities the model left without a build order still need one, or the turn cannot progress. */
@@ -143,9 +156,15 @@ object LlmTurnPlanner {
     private fun applyResearch(civ: Civilization, plan: JsonObject, applied: MutableList<String>) {
         val tech = plan["research"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: return
         if (!civ.tech.canBeResearched(tech)) return
-        // Research is only chosen once per turn: the queue already runs automatically after the
-        // first pick, so re-applying it every round would keep resetting progress.
-        if (civ.tech.techsToResearch.isNotEmpty()) return
+
+        // A technology already being researched owns the slot: changing it throws away every
+        // science point invested so far, and the model has no reason to do that.
+        val inProgress = civ.tech.currentTechnologyName() ?: civ.tech.techsToResearch.firstOrNull()
+        if (inProgress != null) {
+            if (inProgress != tech)
+                Log.debug("Ignoring research change from $inProgress to $tech")
+            return
+        }
         civ.tech.techsToResearch.add(tech)
         applied += "研究 $tech"
     }

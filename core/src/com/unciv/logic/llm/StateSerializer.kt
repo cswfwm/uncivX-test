@@ -21,8 +21,18 @@ object StateSerializer {
 
         appendLine()
         appendLine("=== RESEARCH ===")
-        appendLine("current=${civ.tech.currentTechnologyName() ?: "none"}")
-        appendLine("researchable=${researchableTechs(civ).joinToString(", ")}")
+        val currentTech = civ.tech.currentTechnologyName()
+        if (currentTech == null) {
+            appendLine("正在研发：无（需要选择）")
+        } else {
+            val invested = civ.tech.researchOfTech(currentTech)
+            val cost = civ.tech.costOfTech(currentTech)
+            val remaining = (cost - invested).coerceAtLeast(0)
+            appendLine("正在研发：$currentTech（已投入 $invested / $cost，剩余约 $remaining 科研点，" +
+                "预计 ${civ.tech.turnsToTech(currentTech)} 回合）")
+        }
+        appendLine("后续队列：${civ.tech.techsToResearch.drop(1).joinToString(", ").ifEmpty { "空" }}")
+        appendLine("可研究：${researchableTechs(civ).joinToString(", ")}")
 
         appendLine()
         appendLine("=== CITIES (${civ.cities.size}) ===")
