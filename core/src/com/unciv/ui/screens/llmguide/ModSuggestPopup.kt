@@ -5,6 +5,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane
 import com.badlogic.gdx.scenes.scene2d.ui.Table
 import com.unciv.UncivGame
 import com.unciv.logic.github.GithubAPI
+import com.unciv.logic.github.GithubAPI.downloadAndExtract
 import com.unciv.models.ruleset.RulesetCache
 import com.unciv.ui.components.extensions.toLabel
 import com.unciv.ui.components.extensions.toTextButton
@@ -75,8 +76,8 @@ class ModSuggestPopup(
                 val folder = repo.downloadAndExtract { state, percent ->
                     launchOnGLThread {
                         statusLabel.setText(
-                            when (state.name) {
-                                "Downloading" -> "下载中 ${percent ?: 0}%"
+                            when (state) {
+                                GithubAPI.DownloadAndExtractState.Downloading -> "下载中 ${percent ?: 0}%"
                                 else -> "解压中…"
                             })
                     }
@@ -90,8 +91,8 @@ class ModSuggestPopup(
                     }
                     // Load it into the cache so it appears in the mod list; never auto-enable.
                     RulesetCache.loadRulesets()
-                    statusLabel.setText("已下载：${folder.name()}（未自动启用）")
-                    onAccepted(folder.name())
+                    statusLabel.setText("已下载：${folder.name}（未自动启用）")
+                    onAccepted(folder.name)
                 }
             } catch (ex: Exception) {
                 launchOnGLThread {

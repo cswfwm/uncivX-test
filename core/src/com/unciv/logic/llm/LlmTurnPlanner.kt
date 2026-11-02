@@ -6,6 +6,7 @@ import com.unciv.logic.city.City
 import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.map.mapunit.MapUnit
 import com.unciv.models.ruleset.unique.UniqueType
+import com.unciv.models.translations.tr
 import com.unciv.utils.Log
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -33,7 +34,7 @@ object LlmTurnPlanner {
         "\"units\": array of {\"id\": unit id from the state, \"move\": [x,y]} for a destination tile; " +
         "\"reasoning\": one short sentence. " +
         "\"settings\": array of {\"key\": whitelisted key, \"value\": true/false} to propose settings changes; " +
-        "Only use names that appear in the provided game state. Omit anything you are unsure about. " +
+        "The game state uses Chinese names; reuse those exact names in your answer. " +
         "Write \"reasoning\" in Simplified Chinese. " +
         "Never assume a settings change took effect: every entry is shown to the player for approval. " +
         "Allowed settings keys: " + "autoAssignCityProduction, autoBuildingRoads, automatedUnitsCanUpgrade, " +
@@ -187,7 +188,8 @@ object LlmTurnPlanner {
     }
 
     private fun applyResearch(civ: Civilization, plan: JsonObject, applied: MutableList<String>) {
-        val tech = plan["research"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: return
+        val requested = plan["research"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: return
+        val tech = resolveTechName(civ, requested) ?: return
         if (!civ.tech.canBeResearched(tech)) return
 
         // A technology already being researched owns the slot: changing it throws away every
@@ -214,6 +216,13 @@ object LlmTurnPlanner {
         }
     }
 
+    /** Accepts either the ruleset key or its translated name. */
+    private fun resolveTechName(civ: Civilization, requested: String): String? {
+        val technologies = civ.gameInfo.ruleset.technologies
+        if (requested in technologies) return requested
+        return technologies.values.firstOrNull { it.name.tr() == requested }?.name
+    }
+
     private fun applyPolicy(civ: Civilization, plan: JsonObject, applied: MutableList<String>) {
         val name = plan["policy"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
         if (!civ.policies.canAdoptPolicy()) return
@@ -223,8 +232,11 @@ object LlmTurnPlanner {
             adoptAnyPolicy(civ, applied)
             return
         }
-        val policy = civ.gameInfo.ruleset.policies[name]
-            ?: civ.gameInfo.ruleset.policyBranches[name]
+        val ruleset = civ.gameInfo.ruleset
+        val policy = ruleset.policies[name]
+            ?: ruleset.policyBranches[name]
+            ?: ruleset.policies.values.firstOrNull { it.name.tr() == name }
+            ?: ruleset.policyBranches.values.firstOrNull { it.name.tr() == name }
         if (policy != null && civ.policies.isAdoptable(policy)) {
             civ.policies.adopt(policy)
             applied += "采纳政策 $name"
@@ -254,17 +266,25 @@ object LlmTurnPlanner {
         for (entry in requested.jsonArray) {
             val name = entry.jsonObject["name"]?.jsonPrimitive?.content ?: continue
             val build = entry.jsonObject["build"]?.jsonPrimitive?.content ?: continue
-            val city = civ.cities.firstOrNull { it.name == name } ?: continue
-            if (!isBuildable(city, build)) continue
-            city.cityConstructions.setCurrentConstruction(build)
+            val city = civ.cities.firstOrNull { it.name == name }
+                ?: civ.cities.firstOrNull { it.name.tr() == name } ?: continue
+            val resolved = resolveConstructionName(city, build) ?: continue
+            city.cityConstructions.setCurrentConstruction(resolved)
             applied += "$name builds $build"
         }
     }
 
-    private fun isBuildable(city: City, constructionName: String): Boolean {
+    /**
+     * The model sees translated names, so a build order may arrive in Chinese. Map it back to the
+     * ruleset key before touching game state.
+     */
+    private fun resolveConstructionName(city: City, requested: String): String? {
         val ruleset = city.getRuleset()
-        if (constructionName !in ruleset.buildings && constructionName !in ruleset.units) return false
-        return !city.cityConstructions.isBuilt(constructionName)
+        if (requested in ruleset.buildings || requested in ruleset.units) return requested
+        val unit = ruleset.units.values.firstOrNull { it.name.tr() == requested }
+        if (unit != null) return unit.name
+        val building = ruleset.buildings.values.firstOrNull { it.name.tr() == requested }
+        return building?.name
     }
 
     private fun applyUnits(civ: Civilization, plan: JsonObject, applied: MutableList<String>) {

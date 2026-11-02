@@ -4,6 +4,7 @@ import com.unciv.logic.GameInfo
 import com.unciv.logic.city.City
 import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.map.mapunit.MapUnit
+import com.unciv.models.translations.tr
 
 /**
  * Renders the current game into a compact text block for the LLM.
@@ -28,11 +29,11 @@ object StateSerializer {
             val invested = civ.tech.researchOfTech(currentTech)
             val cost = civ.tech.costOfTech(currentTech)
             val remaining = (cost - invested).coerceAtLeast(0)
-            appendLine("正在研发：$currentTech（已投入 $invested / $cost，剩余约 $remaining 科研点，" +
+            appendLine("正在研发：${currentTech.tr()}（已投入 $invested / $cost，剩余约 $remaining 科研点，" +
                 "预计 ${civ.tech.turnsToTech(currentTech)} 回合）")
         }
-        appendLine("后续队列：${civ.tech.techsToResearch.drop(1).joinToString(", ").ifEmpty { "空" }}")
-        appendLine("可研究：${researchableTechs(civ).joinToString(", ")}")
+        appendLine("后续队列：${civ.tech.techsToResearch.drop(1).joinToString(", ") { it.tr() }.ifEmpty { "空" }}")
+        appendLine("可研究：${researchableTechs(civ).joinToString(", ") { it.tr() }}")
 
         appendLine()
         appendLine("=== CITIES (${civ.cities.size}) ===")
@@ -66,7 +67,7 @@ object StateSerializer {
 
     private fun describeUnit(unit: MapUnit): String {
         val position = if (unit.hasTile()) "${unit.currentTile.position.x},${unit.currentTile.position.y}" else "?"
-        return "- id=${unit.id} ${unit.name} pos=$position hp=${unit.health}/${unit.getMaxHealth()} " +
+        return "- id=${unit.id} ${unit.name.tr()} pos=$position hp=${unit.health}/${unit.getMaxHealth()} " +
             "move=${unit.currentMovement}/${unit.getMaxMovement()}"
     }
 
