@@ -3,7 +3,9 @@ package com.unciv.logic.llm
 import com.unciv.logic.UncivKtor
 import com.unciv.logic.github.GithubAPI
 import com.unciv.utils.Log
+import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 
@@ -40,15 +42,18 @@ object DownloadSourceTester {
         val url = prefixOf(source) + PROBE
         val start = System.currentTimeMillis()
         return try {
-            val response = UncivKtor.getOrNull(url)
+            // A range-limited GET only fetches the first bytes, so a probe costs a few hundred
+            // milliseconds instead of a full file download.
+            val response = UncivKtor.getOrNull(url) {
+                header(HttpHeaders.Range, "bytes=0-1023")
+            }
             val millis = System.currentTimeMillis() - start
             if (response == null) {
                 Result(source, false, millis, 0.0, "无法连接")
             } else {
                 val bytes = response.bodyAsText().length
                 val seconds = (millis / 1000.0).coerceAtLeast(0.001)
-                val speed = bytes / 1024.0 / seconds
-                Result(source, true, millis, speed, "可用，${millis}ms，约 ${speed.toInt()} KB/s")
+                Result(source, true, millis, bytes / 1024.0 / seconds, "可用，${millis}ms")
             }
         } catch (ex: Exception) {
             Log.debug("Probe failed for ${source.name}: ${ex.message}")

@@ -8,6 +8,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane
 import com.badlogic.gdx.scenes.scene2d.ui.Table
 import com.badlogic.gdx.utils.Align
 import com.unciv.UncivGame
+import com.unciv.logic.llm.ChatHistory
 import com.unciv.logic.llm.LlmClient
 import com.unciv.logic.llm.LlmUsage
 import com.unciv.logic.llm.WebSearch
@@ -59,6 +60,10 @@ class AiGuideScreen : BaseScreen() {
         val speedTest = "测试加速源".toTextButton()
         speedTest.onClick { runSpeedTest(speedTest) }
         tools.add(speedTest).padRight(8f)
+
+        val downloads = "下载列表".toTextButton()
+        downloads.onClick { ModDownloadListPopup(this).open() }
+        tools.add(downloads).padRight(8f)
         usageLabel.setText(LlmUsage.summary())
         tools.add(usageLabel).expandX().left()
         root.add(tools).growX().row()
@@ -81,16 +86,24 @@ class AiGuideScreen : BaseScreen() {
             }
         })
 
-        append("系统", "可以让我做这些事：查询或翻译游戏机制、推荐并下载模组、查看或修改游戏设置。")
+        // Restore the previous conversation so closing the console does not lose context.
+        ChatHistory.load()
+        val restored = ChatHistory.all()
+        if (restored.isEmpty()) {
+            append("系统", "可以让我做这些事：查询或翻译游戏机制、推荐并下载模组、查看或修改游戏设置。")
+        } else {
+            for (entry in restored) append(entry.who, entry.text, persist = false)
+        }
     }
 
-    private fun append(who: String, text: String) {
+    private fun append(who: String, text: String, persist: Boolean = true) {
         val label = Label("$who：$text", BaseScreen.skin)
         label.wrap = true
         label.setAlignment(Align.topLeft)
         transcript.add(label).row()
         scrollPane.layout()
         scrollPane.scrollTo(0f, 0f, 0f, 0f)
+        if (persist) ChatHistory.add(who, text)
     }
 
     /** Probes every mod mirror from this device and offers to switch to the fastest one. */
@@ -128,7 +141,14 @@ class AiGuideScreen : BaseScreen() {
         Concurrency.run("AiGuide") {
             val reference = if (settings.allowWebSearch && WebSearch.shouldLookUp(command))
                 WebSearch.lookup(command) else null
+            val recent = ChatHistory.all().takeLast(12)
+                .joinToString("\n") { "${it.who}：${it.text}" }
             val prompt = buildString {
+                if (recent.isNotBlank()) {
+                    appendLine("此前的对话（供参考）：")
+                    appendLine(recent)
+                    appendLine()
+                }
                 appendLine("玩家指令：$command")
                 if (reference != null) appendLine("联网参考资料：$reference")
                 appendLine()
