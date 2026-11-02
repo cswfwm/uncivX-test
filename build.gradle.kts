@@ -1,0 +1,228 @@
+import com.unciv.build.BuildConfig.appVersion
+import com.unciv.build.BumpVersionTask
+import com.unciv.build.SyncGameVersionTask
+import java.util.Properties
+
+buildscript {
+    repositories {
+        // Chinese mirrors for quicker loading for chinese devs - uncomment if you're chinese
+        // maven{ url = uri("https://maven.aliyun.com/repository/central") }
+        // maven{ url = uri("https://maven.aliyun.com/repository/google") }
+        // maven{ url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
+        // repo1.maven.org 是 Maven Central 源站：GitHub Actions 的 ubuntu runner 对
+        // repo.maven.apache.org（Fastly CDN）偶发 403 且 Gradle 不会换仓库重试，
+        // 故直接用源站（见 https://github.com/actions/runner/issues/4180）
+        maven { url = uri("https://repo1.maven.org/maven2") }
+        google()  // needed for com.android.tools.build:gradle
+        maven { url = uri("https://central.sonatype.com/repository/maven-snapshots/") }
+        gradlePluginPortal()
+    }
+    dependencies {
+        classpath(libs.kotlinPlugin)
+        classpath(libs.agp)
+    }
+}
+
+// Fixes the error "Please initialize at least one Kotlin target in 'Unciv (:)'"
+kotlin {
+    jvm()
+    java {
+        // required for building Unciv with a Java version higher than 24 (e.g. Java 25)
+        sourceCompatibility = JavaVersion.VERSION_21
+    }
+}
+
+
+// Plugins used for serialization of JSON for networking
+plugins {
+    val kotlinVersion: String = libs.versions.kotlin.get()
+    kotlin("multiplatform") version kotlinVersion
+    kotlin("plugin.serialization") version kotlinVersion
+    alias(libs.plugins.detekt)
+    alias(libs.plugins.purity)
+}
+
+// 把 BuildConfig.kt 的版本号同步到 UncivGame.kt（游戏内显示），见 SyncGameVersionTask
+val syncGameVersion by tasks.registering(SyncGameVersionTask::class) {
+    group = "build"
+    description = "Sync app version from BuildConfig.kt into UncivGame.kt (in-game version display)"
+}
+
+// 一键升版本：改真源 + 游戏内版本 + 中英 changelog，并重新生成 lua 文档，见 BumpVersionTask
+val bumpVersion by tasks.registering(BumpVersionTask::class) {
+    group = "build"
+    description = "Bump app version (BuildConfig.kt + UncivGame.kt + changelogs) and regenerate generated docs"
+    newVersion = providers.gradleProperty("newVersion").orNull
+    newCode = providers.gradleProperty("newCode").orNull
+    bump = providers.gradleProperty("bump").orNull
+}
+// 版本改写后重新生成 docs/Modders/lua-api.lua 等（须在 core 用新版本重编译之后）
+bumpVersion.configure { finalizedBy(":desktop:generateDocs") }
+
+// Kludge to get the correct string notation for a gdx native (':' _after_ version seems beyond toml)
+fun gdxNatives(platform: String) = "${libs.gdx.platform.get()}:natives-$platform"
+
+// from here on you can't simply use `libs` anymore, see https://github.com/gradle/gradle/issues/18237#issuecomment-928079890
+
+allprojects {
+//    repositories { // for local purity
+//        mavenLocal()
+//    }
+    val purityId = rootProject.libs.plugins.purity.get().pluginId
+    apply(plugin = purityId)
+    configure<yairm210.purity.PurityConfiguration> {
+        wellKnownPureFunctions = setOf(
+            "io.ktor.http.Url", //constructor
+        )
+        wellKnownReadonlyFunctions = setOf(
+            "com.badlogic.gdx.math.Vector2.len",
+            "com.badlogic.gdx.math.Vector2.cpy",
+            "com.badlogic.gdx.math.Vector2.hashCode",
+
+            "com.badlogic.gdx.graphics.Color.cpy",
+            "com.badlogic.gdx.graphics.Color.toString",
+
+            "com.badlogic.gdx.files.FileHandle.child",
+            "com.badlogic.gdx.files.FileHandle.list",
+            "com.badlogic.gdx.files.FileHandle.exists",
+            "com.badlogic.gdx.files.FileHandle.isDirectory",
+            "com.badlogic.gdx.files.FileHandle.isFile",
+            "com.badlogic.gdx.files.FileHandle.name",
+
+            "com.badlogic.gdx.utils.IntArray.get",
+
+            "io.ktor.http.Url.segments",
+            "io.ktor.http.Url.parameters",
+            "io.ktor.http.Parameters.get",
+
+            "java.util.BitSet.clone",
+
+            "kotlin.collections.orEmpty",
+        )
+        wellKnownPureClasses = setOf(
+        )
+        wellKnownInternalStateClasses = setOf(
+            "com.badlogic.gdx.math.Vector2",
+        )
+        warnOnPossibleAnnotations = false
+    }
+
+    apply(plugin = "eclipse")
+    apply(plugin = "idea")
+
+    version = appVersion
+
+    repositories {
+        // Chinese mirrors for quicker loading for chinese devs - uncomment if you're chinese
+        // maven{ url = uri("https://maven.aliyun.com/repository/central") }
+        // maven{ url = uri("https://maven.aliyun.com/repository/google") }
+        maven { url = uri("https://repo1.maven.org/maven2") }
+        google()
+        // Needed only in case a version with a "-SNAPSHOT" qualifier is requested
+        maven { url = uri("https://central.sonatype.com/repository/maven-snapshots/") }
+        // Activate only when Central is down, or you need a super-fresh release (typically a matter of hours at most)
+        // maven { url = uri("https://central.sonatype.com/repository/maven-releases/") }
+        maven { url = uri("https://jitpack.io") } // for java-discord-rpc
+    }
+}
+
+project(":desktop") {
+    apply(plugin = "kotlin")
+
+    dependencies {
+        "implementation"(project(":core"))
+        "implementation"(rootProject.libs.coroutines.core)
+        "implementation"(rootProject.libs.gdx.backend.desktop)
+        "implementation"(gdxNatives("desktop"))
+
+        "implementation"(rootProject.libs.gdx.tools) {
+            exclude("com.badlogicgames.gdx", "gdx-backend-lwjgl")
+        }
+
+        // Needed to display "Playing Unciv" in Discord
+        "implementation"(rootProject.libs.discord)
+
+        // Needed for Windows turn notifiers
+        "api"(rootProject.libs.bundles.jna)
+    }
+}
+
+private fun getSdkPath(): String? {
+    // See #13566 - Android Studio has moved its primary method to store where to find its SDK
+    val localProperties = project.file("local.properties")
+    return if (localProperties.exists()) {
+        val properties = Properties()
+        localProperties.inputStream().use { properties.load(it) }
+
+        properties.getProperty("sdk.dir") ?: System.getenv("ANDROID_HOME")
+    } else {
+        System.getenv("ANDROID_HOME")
+    }
+}
+
+if (getSdkPath() != null) {
+    project(":android") {
+        apply(plugin = "com.android.application")
+
+        val natives by configurations.creating
+
+        dependencies {
+            "implementation"(project(":core"))
+            // Not sure why I had to add this in for the upgrade to 1.12.1 to work, we can probably remove this later since it's contained in core
+            "implementation"(rootProject.libs.gdx)
+            "implementation"(rootProject.libs.gdx.backend.android)
+            "implementation"(rootProject.libs.coroutines.android)
+            natives(gdxNatives("armeabi-v7a"))
+            natives(gdxNatives("arm64-v8a"))
+            natives(gdxNatives("x86"))
+            natives(gdxNatives("x86_64"))
+        }
+    }
+}
+
+
+project(":core") {
+    apply(plugin = "kotlin")
+    // Serialization features (especially JSON for multiplayer apiV2)
+    apply(plugin = "kotlinx-serialization")
+
+    // 编译前先同步游戏内版本号（UncivGame.kt），保证任何平台构建都拿到最新版本
+    tasks.named("compileKotlin") {
+        dependsOn(rootProject.tasks.named("syncGameVersion"))
+        // 让 bumpVersion 先改完 BuildConfig/UncivGame 再重编译，最终生成物才是新版本
+        mustRunAfter(rootProject.tasks.named("bumpVersion"))
+    }
+
+    dependencies {
+        "implementation"(rootProject.libs.gdx)
+        "implementation"(rootProject.libs.gdx.texture.array.batch)
+        "implementation"(rootProject.libs.coroutines.core)
+        "implementation"(rootProject.libs.kotlin.reflect)
+
+        "implementation"(rootProject.libs.purity.annotations)
+        "implementation"(rootProject.libs.luaj.jse)
+        // androidx isn't actually android-specific and core/desktop are safe to depend on it
+        "implementation"(rootProject.libs.androidx.collection)
+
+        "api"(rootProject.libs.bundles.ktor.client)
+    }
+
+
+    // Taken from https://github.com/TomGrill/gdx-testing
+    project(":tests") {
+        apply(plugin = "java")
+        apply(plugin = "kotlin")
+
+        dependencies {
+            "implementation"(project(":core"))
+
+            "implementation"(rootProject.libs.coroutines.core)
+            "implementation"(rootProject.libs.kotlin.reflect)
+
+            "implementation"(rootProject.libs.gdx)
+            "implementation"(rootProject.libs.gdx.backend.headless)
+            "implementation"(rootProject.libs.gdx.backend.desktop)
+            "implementation"(gdxNatives("desktop"))
+        }
+    }
+}

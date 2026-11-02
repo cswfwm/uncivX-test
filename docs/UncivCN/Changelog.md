@@ -1,0 +1,327 @@
+---
+title: UncivCN Changelog
+outline: [2, 2]
+---
+
+# UncivCN Changelog
+
+Version rule: upstream version + CN sub-version (`.1`, `.2`, `.3`…; the same upstream version can have multiple CN sub-versions, e.g. 4.20.8.1 → 4.20.8.4; restarts at `.1` after merging a new upstream, e.g. 4.21.5 → 4.21.5.1).
+
+Each release is grouped by audience: **Player-facing** for changes players notice in game, and **Mod author-facing** for behaviour that mods and Lua scripts rely on. Purely internal changes are not listed; older releases predate this split.
+
+::: tip
+Upstream (vanilla) release notes: [official Unciv changelog](https://github.com/yairm210/Unciv/blob/master/changelog.md)
+:::
+
+## Unreleased
+
+### Player-facing
+
+### Mod author-facing
+
+## 4.22.4.4 (build 1266)
+
+### Player-facing
+
+- Fix: remaining players no longer stall forever after the first player advances a simultaneous turn
+- Fix: more unit and city actions are replicated in simultaneous turns, and Undo is disabled to prevent desync
+- Fix: replaying a simultaneous turn no longer leaves duplicate units behind
+- Fix: unit moves and attacks are no longer dropped at simultaneous-turn settlement
+- Change: the simultaneous-turns option is available again, now labeled beta
+- Fix: simultaneous turns now also replay city attacks and catch any state change that was not recorded
+- Fix: a long simultaneous-turn settlement keeps its settlement lock alive instead of being taken over midway
+- Fix: an action that both moves a unit and changes other state is now replayed completely in simultaneous turns
+- Fix: a unit that leaves a tile is no longer left behind there during simultaneous-turn replay
+- Fix: a conflict between two players in one simultaneous turn no longer discards their other changes
+- Fix: resuming a simultaneous turn after a reload no longer drops actions taken afterwards
+- Fix: reloading mid-turn in a simultaneous game restores the actions you already took
+- Fix: an improvement destroyed in a simultaneous turn no longer comes back after settlement
+- Fix: stopping a unit's automation sticks in simultaneous turns
+- Fix: exploring new tiles in a simultaneous turn no longer changes other clients' state and drops their actions
+- Fix: recording a simultaneous-turn state change no longer crashes while reading the previous state
+- Fix: simultaneous turns no longer record a redundant catch-all state snapshot on every turn
+
+### Mod author-facing
+
+## 4.22.4.3 (build 1265)
+
+### Player-facing
+
+- Fix: Android in-game update no longer crashes when tapping Install
+- Fix: a leftover multiplayer turn-settlement lock no longer freezes the game permanently
+- Fix: mirrored maps no longer lose resources placed by region generation
+- Fix: two players changing world state in the same simultaneous turn no longer abort the turn
+- Fix: map notes only open when the matching note option is on, and your own note text is no longer translated
+- Fix: top-bar variable totals no longer promise unreachable values or hide behind unit variables
+- Fix: CSV exports no longer truncate turns and now escape line breaks
+- Fix: a corrupted save no longer claims to come from a newer version
+- Fix: the "new version available" label no longer stacks up after repeated checks
+
+### Mod author-facing
+
+- Fix: reloaded Lua mods can no longer freeze the game, functions no longer leak across mods, and their errors are reported again
+- Fix: field-level mod merges now apply to techs, victory types and city-state types, invalid conditions fail loudly, and removed fields really reset
+- Fix: mods merged on top of others keep their own origin, and immutable fields can now be merged
+- Fix: Lua reports mountains correctly, no longer leaves ghost resource amounts, and handles extreme random ranges
+- Fix: mod versions like 1.2 and 1.2.0 now compare consistently, and malformed versions no longer satisfy dependencies
+- Fix: Lua scripts can no longer exhaust memory by building enormous strings
+
+## 4.22.4.2 (build 1264)
+
+- New first-launch community services consent popup; adults only
+- Terms of service and privacy policy now include a minors section
+- Privacy policy clarified: visiting overseas/mirror sites is your own action
+- Terms of service clarified: community services are non-commercial infrastructure, not game publishing
+
+## 4.22.4.1 (build 1263)
+
+- Multiplayer server moved to a new HTTPS address; update the client
+- New terms of service and a rewritten privacy policy; the community services are volunteer-run and not official
+- Community multiplayer servers can now use approved registration, and chat can be turned off
+- Multiplayer server: cold saves are archived to encrypted storage when space runs out, and restored when someone opens them
+- Update checks and installer downloads now go through the community mirror link, which is faster
+- Merged upstream 4.22.4 (262 commits)
+- Invisible units are no longer invisible to their own civilization
+- New "Known Civilizations" countable
+- Victories can now carry uniques
+- Notable rendering-lag and screen-switching freeze improvements
+- Many spectator and UI crash fixes
+- CN-specific features are unaffected and keep working
+- Completed Chinese translations and Chinese modding docs for the 4.22 additions
+- Multiplayer: the server now accepts save files up to 32MB
+
+## 4.21.10.7 (build 1262)
+
+- Revert: unit experience is no longer a moddable variable - XP is engine-managed again; mods reading `Experience` now get 0 (see [Variables.json](/Modders/Mod-file-structure/5-Miscellaneous-JSON-files#variables-json))
+- Revert: missionary strength loss is engine-managed again - the `ReligiousStrengthLost` variable and its destroy combination are removed (see [Variables.json](/Modders/Mod-file-structure/5-Miscellaneous-JSON-files#variables-json))
+- Fix: no more crash when tapping buttons after an in-game update download - install prompt and browser links are now guarded
+- New: persistent update download progress bar - survives closing the update popup, dismissible without cancelling the download
+
+## 4.21.10.6 (build 1261)
+
+- Release: synchronize generated Lua API documentation
+- Multiplayer: simultaneous-turn submissions accept omitted default fields
+- Multiplayer: fixed clients incorrectly falling back after successful operation uploads
+- Multiplayer: added HTTP polling fallback when operation signals are missed
+- Fix: in-game update checks now verify CN download server synchronization
+- Multiplayer: simultaneous turns now advance after all players submit
+- Multiplayer: simultaneous-turn submissions now use the dedicated atomic operation store
+
+## 4.21.10.3 (build 1258)
+
+- Multiplayer: added the experimental simultaneous-turn operation protocol
+- Multiplayer: simultaneous-turn operation files are deduplicated by player and sequence
+- Multiplayer: simultaneous turns now replay unit orders without rerolling combat
+- Multiplayer: fortify, sleep and skip orders are included in simultaneous turns
+- Multiplayer: simultaneous-turn settlement now uses an atomic server lock
+- Multiplayer: expanded simultaneous-turn snapshots to diplomacy popups, events and special unit UI
+- Multiplayer: automated, Lua and triggered unit effects are replayed from result snapshots
+- Multiplayer: simultaneous turns now record city production, technology and policy choices
+- Multiplayer: complex unit actions now replay modded state changes
+- Modding: unit-scope variables - attach integer counters to individual units (see [Variables.json](/Modders/Mod-file-structure/5-Miscellaneous-JSON-files#variables-json))
+- Modding: unit experience is now a variable, old saves migrate automatically (see [Variables.json](/Modders/Mod-file-structure/5-Miscellaneous-JSON-files#variables-json))
+- Modding: variables support city, civilization and global scopes (see [Variables.json](/Modders/Mod-file-structure/5-Miscellaneous-JSON-files#variables-json))
+- Modding: variables support bounds, per-turn yields, percentage bonuses, purchase costs, production conversion (see [Variables.json](/Modders/Mod-file-structure/5-Miscellaneous-JSON-files#variables-json))
+- Modding: variables support Lua read/write and scope-aware UI (see [Variables.json](/Modders/Mod-file-structure/5-Miscellaneous-JSON-files#variables-json))
+- Modding: civilization-scope variables now need an explicit scope declaration
+- Fix: variable purchases charge exact cost, values survive reloads, no AI crashes
+- Modding: variables work in all countable positions and Set triggerables (see [Variables.json](/Modders/Mod-file-structure/5-Miscellaneous-JSON-files#variables-json))
+- Merged upstream: fixed repair with only a pillaged road left, and an ANR when opening the Civilopedia
+- Merged upstream: CN features adapted to the new architecture, behavior unchanged
+- Docs: CoeHarMod changelog moved to the mods section (see [changelog](/Community/Mods/CoeHarMod/changelog/))
+- Docs: upstream changelog replaced by a link at the top of this page
+- Docs: changelog entries limited to 30 words; big changes may be split into multiple entries
+
+## 4.21.10.2 (build 1257)
+
+- Update: updates are now routed by region - mainland China uses the official CN server (see [server-ts/README.md](https://github.com/blyrin/unciv-srv/blob/main/README.md))
+- Update: first launch asks your region (changeable in Options - Advanced)
+- Merged upstream: fixed several spectator and city-screen crashes
+
+## 4.21.10.1 (build 1256)
+
+- Modding: new civilization-scope variables with conditionals, triggers and Lua (see [Variables.json](/Modders/Mod-file-structure/5-Miscellaneous-JSON-files#variables-json))
+- Modding: variable display (top bar, resources overview) is configurable (see [Variables.json](/Modders/Mod-file-structure/5-Miscellaneous-JSON-files#variables-json))
+- Modding: conditional amounts (e.g. `when above [amount] ...`, HP/movement/population thresholds) now accept Countable expressions like `[Cities]` - see [Unique parameters](/Modders/Unique-parameters#countable)
+- Merged upstream: UI and crash fixes, squashed promotion notifications
+- Fix: rotational-symmetry map generation glitches (wrapped/mirror maps) (see [Features](/UncivCN/Features))
+
+## 4.21.8.3 (build 1255)
+
+- Multiplayer: new "Forbid reloading" option - no redoing turns by re-entering
+- Modding: new immediate production overflow unique (see [uniques](/Modders/uniques))
+
+## 4.21.8.2 (build 1254)
+
+- Fix: map pin (tile note) previews no longer render unrevealed resources ahead of time (e.g. no oil in the Ancient era)
+- Modding: Civ6-style unit maintenance (opt-in), upkeep shown in Civilopedia (see [Units.json](/Modders/Mod-file-structure/4-Unit-related-JSON-files) and [uniques](/Modders/uniques))
+- Modding: [amount]-type parameters now fully support Countable expressions (radii, amounts, free units, heal/damage/XP values, turn conditions) - see [Unique parameters](/Modders/Unique-parameters)
+- Modding: new trigger, conditional and reverse uniques (combat / pillage / raze triggers, fortified / embarked conditionals, lose control over tiles / lose a spy / end a golden age / hide explored tiles) - see [uniques](/Modders/uniques)
+- Modding/Lua: Lua can modify tile yields, take over combat strength and damage formulas, and react to combat / capture events with full attacker-defender context - see [Lua Modding](/Modders/Lua-Modding)
+- Modding: new ModOptions.json version fields (`recommendedGameVersion`, `recommendedVersion` dependencies) with a non-blocking warning when the game version differs - see [ModOptions.json](/Modders/Mod-file-structure/5-Miscellaneous-JSON-files)
+- Modding: merge (REMOVE_FIELD) crash on float fields fixed - see [MergeActions](/Modders/Mod-file-structure/6-MergeActions)
+
+## 4.21.8.1 (build 1253)
+
+- Merged upstream: crash fixes, new optional "Tiles Explored" ranking
+- Difficulty: AI unhappiness modifier for King and above is now 100/90/85/75 (was 90/85/75/60)
+- Modding: unit max HP is now moddable - `maxHP` field plus the new "[relativeAmount] Max HP" unique; wounded penalty scales with HP percentage - see [Units.json](/Modders/Mod-file-structure/4-Unit-related-JSON-files)
+- Main menu bottom-right buttons: Discord entry replaced by a QQ group link, Baidu Tieba button added, GitHub button points to the CN fork; About page links updated
+- Docs site links adapt to the client language (Chinese clients get the /zh/ section)
+- In-game wiki links point to the CN docs site
+- Code cleanup & bugfixes from a full-project review (dead code removed, city/filter bugs fixed)
+
+## 4.21.7.2 (build 1252)
+
+- Android: update popup downloads the APK in-game with progress and installs it (unknown-sources permission guided)
+- Android: downloads are interruption-safe, Install/Redownload buttons, copy to the public Downloads folder, old packages cleaned up
+- Main menu "Download latest version" lists the platform's installers and downloads the chosen one directly
+
+## 4.21.7.1 (build 1251)
+
+- Merged upstream 4.21.7 / 4.21.7-patch1 / patch2 (41 commits): AI war-logic fixes, Stealth Bomber Evasion, MP average turn times, minimap ANR fix, Gradle 9.4.1 + LibGDX 1.14.2
+- Lua API: added unit.getEraNumber() and civ.discoverTech() - see [Lua API Reference](/Modders/Lua-API-Reference)
+- Mods: CoeHarMod moved to its own repo as a git submodule, rules consolidated via Lua
+
+## 4.21.6.6 (build 1250)
+
+- Automatic update check on the main menu (mirror fallback); "Mod download source" renamed "Download source"
+- Fixed Lua runtime crash on function-call arguments in custom API functions
+- Lua API expansion (~100 new methods), ConditionalLuaCheck unique, TriggerUponTradeMade hook - see [Lua Modding](/Modders/Lua-Modding)
+- Lua map scripts: mods can ship a map generator (`scripts/`), new "Lua Generated" map type
+- Lua sandbox hardening; mod checker covers map-script APIs
+
+## 4.21.6.5 (build 1249)
+
+- Lua runtime errors now show line numbers; sandbox escape via package.loaded closed; instruction budget against runaway loops
+- New: multiplayer restart votes (host enables, everyone votes, timeout = agree, auto-restart)
+
+## 4.21.6.4 (build 1248)
+
+- New: "Mod download source" setting with China mirror support
+- New-game screen: save/load setups to named slots; clipboard buttons moved; "Reset to defaults" replaced by a built-in "Default setup"
+
+## 4.21.6.3 (build 1247)
+
+- Fixed Docker build copying stale Unciv.jar name; fixed MSI missing from releases
+
+## 4.21.6.2 (build 1246)
+
+- Fixed 47 missing + 10 empty Simplified Chinese translations for CN-specific UI strings
+
+## 4.21.6.1 (build 1245)
+
+- Notes keyed by gameId (no more leaking across saves)
+- Map/unit pins: long-press / Alt+click editing, note bubbles, crash fix, CN translations
+- Fixed duplicate size rows on the new-game screen; aligned bundled rulesets with upstream
+- Merged upstream 4.21.6 (CPU perf, AI worker adjacency, MP upload indicator)
+
+## 4.21.5.3 (build 1244)
+
+- Fixed CI test failures (translation template spaces, test mods tracked in repo); deployment notifications cleaned up
+
+## 4.21.5.2 (build 1243)
+
+- Official VitePress docs site (Chinese full-text search, EN/CN switch)
+- Unique documentation descriptions now available in Chinese
+- Local APK signing, UncivCN artifact names
+
+## 4.21.5.1 (build 1242)
+
+- Merged upstream 4.21.5 (AI war-logic fixes, CPU perf)
+- Unbundled the UCCC mod; new: export/import game setup to clipboard; citizen auto-lock tweaks; stats-display bug fixed
+
+## 4.21.0.2 (2026-08-01)
+
+- Fixed UCCC mod bugs
+
+## 4.21.0.1 (2026-08-01)
+
+- Synced recent upstream (mirror maps, stats panel); completed Chinese localization
+- Default MP server `sp.unciv.cn:30123`; citizen auto-lock button; bundled UCCC mod
+- RNG re-roll on load disabled in multiplayer
+
+## 4.20.17.2 (2026-07-12)
+
+- New: unit/map pins; radius parity restriction lifted; save version isolation; no more starvation when training settlers
+
+## 4.20.17.1 (2026-07-04)
+
+- Followed a month of upstream updates
+
+## 4.20.8.4 (2026-05-26)
+
+- Mod checker lints Lua errors; polling MP shows online status
+
+## 4.20.8.3 (2026-05-23)
+
+- Lua system enhanced; events hookable with Lua
+
+## 4.20.8.2 (2026-05-22)
+
+- Mods support [Lua scripting](/Modders/Lua-Modding)
+- Fixed G&K "Elite Education" not granting great people; TRY_INJECT cost bug
+- Amount parameters accept Countables
+
+## 4.20.8.1 (2026-05-21)
+
+- New: [polling multiplayer](./Polling-multiplayer)
+
+## 4.20.7.4 (2026-05-19)
+
+- Center-symmetric maps distribute resources symmetrically
+
+## 4.20.7.3 (2026-05-19)
+
+- Extended mod JSON system, see [MergeAction tutorial](/Modders/Mod-file-structure/6-MergeActions)
+
+## 4.20.7.2
+
+**Released**: 2026-05-19
+
+- Android builds no longer bundle CoeHarMod
+- New: three mirrored map modes (2/3/6-fold center symmetry)
+
+## 4.20.6.3
+
+**Released**: 2026-05-17
+
+- New mod uniques:
+
+| English text | Meaning |
+| --- | --- |
+| `Hidden from city screen` | No longer shown in the city panel |
+| `Can be built [amount] times in each city` | Can be built [amount] times in a single city |
+
+## 4.20.6.1
+
+**Released**: 2026-05-16
+
+- Synced two months of upstream updates
+- Random-result variability folded into a settings toggle
+
+## 4.19.16.2
+
+**Released**: 2026-03-02
+
+- Ancient-ruin results re-rollable by reloading a save
+
+## 4.19.16.1
+
+**Released**: 2026-03-01
+
+- City-state quest results re-rollable by reloading a save
+
+## 4.19.15-cn2
+
+**Released**: 2026-02-28
+
+- New area-attack mod uniques (multi-target, distance falloff, self/counter damage)
+- Stats panel CSV export
+
+## 4.19.15
+
+**Released**: 2026-02-26
+
+- Android bundles [CoeHarMod](https://github.com/AutumnPizazz/CoeHarMod)
+- Adjacent cities can swap tiles (opt-in via ModOptions unique)

@@ -1,0 +1,198 @@
+package com.unciv.logic.multiplayer.storage
+
+import com.badlogic.gdx.Net
+import com.badlogic.gdx.utils.Base64Coder
+import com.badlogic.gdx.utils.JsonReader
+import com.unciv.logic.UncivShowableException
+import com.unciv.utils.debug
+
+object UncivServerFileStorage : FileStorage {
+    var authHeader: Map<String, String>? = null
+    var serverUrl: String = ""
+    var timeout: Int = 30000
+
+    override fun saveFileData(fileName: String, data: String) {
+        SimpleHttp.sendRequest(Net.HttpMethods.PUT, fileUrl(fileName), content=data, timeout=timeout, header=authHeader) {
+                success, result, code ->
+            if (!success) {
+                debug("Error from UncivServer during save: %s", result)
+                when (code) {
+                    401 -> throw MultiplayerAuthException(Exception(result))
+                    else -> throw serverError(code, result)
+                }
+            }
+        }
+    }
+
+    override fun loadFileData(fileName: String): String {
+        var fileData = ""
+        SimpleHttp.sendGetRequest(fileUrl(fileName), timeout=timeout, header=authHeader) {
+                success, result, code ->
+            if (!success) {
+                debug("Error from UncivServer during load: %s", result)
+                when (code) {
+                    404 -> throw MultiplayerFileNotFoundException(Exception(result))
+                    // 服务端可能给出更详细的说明（比如对局被冷归档、正在从网盘恢复），直接展示给玩家
+                    else -> throw serverError(code, result)
+                }
+
+            }
+            else fileData = result
+        }
+        return fileData
+    }
+
+    override fun getFileMetaData(fileName: String): FileMetaData {
+        TODO("Not yet implemented")
+    }
+
+    override fun appendSimultaneousTurnOperations(gameId: String, operations: String): Boolean {
+        var appended = false
+        SimpleHttp.sendRequest(
+            Net.HttpMethods.POST,
+            "$serverUrl/simultaneous-turn-operations/$gameId",
+            content = operations,
+            timeout = timeout,
+            header = authHeader
+        ) { success, _, code ->
+            appended = success && (code == 200 || code == 204)
+        }
+        return appended
+    }
+
+    override fun loadSimultaneousTurnOperations(gameId: String): String? {
+        var data: String? = null
+        SimpleHttp.sendGetRequest("$serverUrl/simultaneous-turn-operations/$gameId", timeout, authHeader) { success, result, code ->
+            if (success) data = result else if (code != 404) throw serverError(code, result)
+        }
+        return data
+    }
+
+    override fun acquireSimultaneousTurnSettlementLock(gameId: String, turn: Int, owner: String): Boolean {
+        var acquired = false
+        SimpleHttp.sendRequest(
+            Net.HttpMethods.POST,
+            "$serverUrl/simultaneous-turn-lock/$gameId",
+            content = "$turn:$owner",
+            timeout = timeout,
+            header = authHeader
+        ) { success, _, code ->
+            acquired = success && code == 201
+        }
+        return acquired
+    }
+
+    override fun renewSimultaneousTurnSettlementLock(gameId: String, turn: Int, owner: String): Boolean {
+        var renewed = false
+        SimpleHttp.sendRequest(
+            Net.HttpMethods.POST,
+            "$serverUrl/simultaneous-turn-lock/$gameId/renew",
+            content = "$turn:$owner",
+            timeout = timeout,
+            header = authHeader
+        ) { success, _, code ->
+            renewed = success && code == 204
+        }
+        return renewed
+    }
+
+    override fun releaseSimultaneousTurnSettlementLock(gameId: String, turn: Int, owner: String) {
+        SimpleHttp.sendRequest(
+            Net.HttpMethods.DELETE,
+            "$serverUrl/simultaneous-turn-lock/$gameId",
+            content = "$turn:$owner",
+            timeout = timeout,
+            header = authHeader
+        ) { _, _, _ -> }
+    }
+
+    override fun deleteFile(fileName: String) {
+        SimpleHttp.sendRequest(Net.HttpMethods.DELETE, fileUrl(fileName), content="", timeout=timeout, header=authHeader) {
+                success, result, code ->
+            if (!success) {
+                when (code) {
+                    404 -> throw MultiplayerFileNotFoundException(Exception(result))
+                    else -> throw serverError(code, result)
+                }
+            }
+        }
+    }
+
+    override fun authenticate(userId: String, password: String): Boolean {
+        var authenticated = false
+        val preEncodedAuthValue = "$userId:$password"
+        authHeader = mapOf("Authorization" to "Basic ${Base64Coder.encodeString(preEncodedAuthValue)}")
+        SimpleHttp.sendGetRequest("$serverUrl/auth", timeout=timeout, header=authHeader) {
+                success, result, code ->
+            if (!success) {
+                debug("Error from UncivServer during authentication: %s", result)
+                authHeader = null
+                when (code) {
+                    401 -> throw MultiplayerAuthException(Exception(result))
+                    else -> throw Exception(result)
+                }
+            } else {
+                authenticated = true
+            }
+        }
+        return authenticated
+    }
+
+    override fun checkAuthStatus(userId: String, password: String): AuthStatus {
+        var authStatus = AuthStatus.UNKNOWN
+        val preEncodedAuthValue = "$userId:$password"
+        authHeader = mapOf("Authorization" to "Basic ${Base64Coder.encodeString(preEncodedAuthValue)}")
+        SimpleHttp.sendGetRequest("$serverUrl/auth", timeout = timeout, header = authHeader) { _, _, code ->
+            authStatus = when (code) {
+                200 -> AuthStatus.VERIFIED
+                204 -> AuthStatus.UNREGISTERED
+                401 -> AuthStatus.UNAUTHORIZED
+                else -> AuthStatus.UNKNOWN
+            }
+        }
+        return authStatus
+    }
+
+    override fun setPassword(newPassword: String): Boolean {
+        if (authHeader == null)
+            return false
+
+        var setSuccessful = false
+        SimpleHttp.sendRequest(Net.HttpMethods.PUT, "$serverUrl/auth", content=newPassword, timeout=timeout, header=authHeader) {
+                success, result, code ->
+            if (!success) {
+                debug("Error from UncivServer during password set: %s", result)
+                when (code) {
+                    401 -> throw MultiplayerAuthException(Exception(result))
+                    else -> throw Exception(result)
+                }
+            } else {
+                setSuccessful = true
+            }
+        }
+        return setSuccessful
+    }
+
+    /**
+     * 把服务端的错误响应转成可以直接展示给玩家的异常。
+     *
+     * 大多数接口的错误响应是 JSON（`{"type":"error","message":"…"}`），
+     * 但提示性响应（例如对局被冷归档、正在从网盘恢复）是纯文本，两种都要能读。
+     */
+    private fun serverError(code: Int?, result: String): UncivShowableException {
+        val detail = Exception("$code $result")
+        val json = try {
+            JsonReader().parse(result)
+        } catch (_: Exception) {
+            null
+        }
+        if (json == null || !json.isObject)
+            return UncivShowableException(result, detail)
+        val message = json.get("message")
+        if (message == null || !message.isString)
+            return UncivShowableException(result, detail)
+        return UncivShowableException(message.asString(), detail)
+    }
+
+    private fun fileUrl(fileName: String) = "$serverUrl/files/$fileName"
+}

@@ -1,0 +1,817 @@
+package com.unciv.logic.github
+
+import com.badlogic.gdx.Files
+import com.badlogic.gdx.files.FileHandle
+import com.unciv.Constants
+import com.unciv.UncivGame
+import com.unciv.json.json
+import com.unciv.logic.UncivKtor
+import com.unciv.logic.UncivShowableException
+import com.unciv.logic.github.Github.repoNameToFolderName
+import com.unciv.models.metadata.GameSettings.PlayerRegion
+import com.unciv.models.translations.tr
+import io.ktor.client.plugins.*
+import io.ktor.client.request.*
+import io.ktor.client.statement.*
+import io.ktor.http.*
+import io.ktor.utils.io.jvm.javaio.*
+import kotlinx.coroutines.delay
+import yairm210.purity.annotations.Immutable
+import yairm210.purity.annotations.Pure
+import yairm210.purity.annotations.Readonly
+import java.util.zip.ZipException
+import java.util.zip.ZipInputStream
+import kotlinx.coroutines.Job
+import java.io.File
+import java.io.FileFilter
+import kotlin.coroutines.coroutineContext
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
+
+enum class DownloadAndExtractState {
+    Downloading {
+        override fun message(progress: Int?) = if (progress == null) "Downloading..." else "{Downloading...} ${progress.coerceIn(0, 100)}%"
+    },
+    Finishing {
+        override fun message(progress: Int?) = "Finishing..."
+    };
+    abstract fun message(progress: Int?): String
+}
+
+/**
+ *  "Namespace" collects all Github API structural knowledge
+ *  - Response schema
+ *  - Query URL builders
+ *
+ *  ### Collected doc links:
+ *  - https://docs.github.com/en/repositories/working-with-files/using-files/downloading-source-code-archives#source-code-archive-urls
+ *  - https://docs.github.com/en/rest/reference/search#search-repositories--code-samples
+ *  - https://docs.github.com/en/rest/repos/repos
+ *  - https://docs.github.com/en/rest/releases/releases
+ *  - https://docs.github.com/en/rest/git/trees#get-a-tree
+ */
+@Suppress("PropertyName")  // We're declaring an external API schema
+object GithubAPI {
+    // region URL formatters
+    /**
+     * @see <a href="https://ktor.io/docs/client-default-request.html#url">
+     *          Ktor Client > Developing applications > Requests > Default request > Base URL
+     *      </a>
+     */
+    const val baseUrl = "https://api.github.com"
+
+    /**
+     * Add a bearer token here if needed
+     *
+     * @see <a href="https://github.com/yairm210/Unciv/issues/13951#issuecomment-3326406877">#13951 (comment)</a>
+     */
+    const val bearerToken = ""
+
+    private val client = UncivKtor.client.config {
+        defaultRequest {
+            header("X-GitHub-Api-Version", "2022-11-28")
+            header(HttpHeaders.Accept, "application/vnd.github+json")
+            userAgent(UncivGame.getUserAgent("Github"))
+            if (bearerToken.isNotBlank()) bearerAuth(bearerToken)
+        }
+    }
+
+    /**
+     * Where to fetch GitHub data (mod list, preview images, archives) from.
+     *
+     * Players with restricted access to github.com (e.g. in mainland China) can switch to a
+     * public GitHub proxy/mirror - entries only prepend their [urlPrefix] to GitHub-hosted URLs,
+     * so direct downloads from other hosts (e.g. Gitee) are never affected.
+     * The active source is stored in `GameSettings.modDownloadSource`.
+     *
+     * This source only affects mod downloads - the in-game update check and installer
+     * downloads always go through the CN download server (see [Constants.uncivDownloadServer]).
+     */
+    enum class ModDownloadSource(val displayName: String, val urlPrefix: String) {
+        Official("GitHub (official)", ""),
+        GhProxyCom("gh-proxy.com", "https://gh-proxy.com/"),
+        GhFastTop("ghfast.top", "https://ghfast.top/"),
+        GhProxyNet("ghproxy.net", "https://ghproxy.net/"),
+        Custom("Custom", "");  // urlPrefix comes from GameSettings.customModDownloadPrefix
+
+        override fun toString() = displayName.tr()  // for direct use in a SelectBox
+
+        companion object {
+            @Readonly
+            fun fromStoredName(name: String) = entries.firstOrNull { it.name == name } ?: Official
+
+            /** The URL prefix to prepend to GitHub URLs; empty for the official source */
+            @Readonly
+            fun getActiveUrlPrefix(): String {
+                val settings = UncivGame.Current.settings
+                val source = fromStoredName(settings.modDownloadSource)
+                return when (source) {
+                    Official -> ""
+                    Custom -> {
+                        val trimmed = settings.customModDownloadPrefix.trim().trimEnd('/')
+                        if (trimmed.isEmpty()) "" else "$trimmed/"
+                    }
+                    else -> source.urlPrefix
+                }
+            }
+        }
+    }
+
+    /** Hosts proxied by [ModDownloadSource] - anything else (e.g. Gitee) passes through unchanged */
+    @Immutable
+    private val githubHosts = listOf(
+        "https://github.com/",
+        "https://raw.githubusercontent.com/",
+        "https://avatars.githubusercontent.com/",
+        "https://api.github.com/",
+        "https://codeload.github.com/",
+        "https://gist.githubusercontent.com/",
+        "https://objects.githubusercontent.com/",
+        "https://github.githubassets.com/",
+    )
+
+    /**
+     * Prepend the active download source's prefix to GitHub-hosted URLs; other URLs pass through unchanged.
+     *
+     * Example with `https://gh-proxy.com/`: `https://github.com/a/b/archive/...zip`
+     * becomes `https://gh-proxy.com/https://github.com/a/b/archive/...zip`.
+     *
+     * Mod downloads (and everything else) always follow the player's download source setting.
+     * Release installer URLs are special-cased by player region ([GameSettings.playerRegion]):
+     * players in mainland China get them rerouted to the CN download server (github.com is
+     * unreliable there), everyone else falls back to the download source like any other URL.
+     */
+    @Readonly
+    fun proxify(url: String): String {
+        val playerRegion = PlayerRegion.fromStoredName(UncivGame.Current.settings.playerRegion)
+        if (isReleaseInstallerUrl(url) && playerRegion == PlayerRegion.MainlandChina) return cnServerUrlFor(url)
+        val prefix = ModDownloadSource.getActiveUrlPrefix()
+        if (prefix.isEmpty()) return url
+        return if (githubHosts.any { url.startsWith(it) }) prefix + url else url
+    }
+
+    //region Update routing: CN download server for mainland China, download source otherwise
+
+    /** GitHub release 安装包下载 URL 格式：https://github.com/<owner>/<repo>/releases/download/<tag>/<file> */
+    private val releaseDownloadUrlRegex =
+        Regex("""^https://github\.com/[^/]+/[^/]+/releases/download/([^/]+)/([^/]+)$""")
+
+    /** Whether [url] is a GitHub release installer download (as opposed to mod zips, the GitHub API, avatars, ...) */
+    @Readonly
+    fun isReleaseInstallerUrl(url: String): Boolean = releaseDownloadUrlRegex.matches(url)
+
+    /** Map a GitHub release installer URL to the CN download server (`<server>/dl/<tag>/<file>`) */
+    @Readonly
+    fun cnServerUrlFor(url: String): String {
+        val match = releaseDownloadUrlRegex.matchEntire(url) ?: return url
+        return "${Constants.uncivDownloadServer}/dl/${match.groupValues[1]}/${match.groupValues[2]}"
+    }
+
+    //endregion
+
+    /**
+     * Make a ktor request handling rate limits automatically
+     */
+    suspend fun request(
+        maxRateLimitedRetries: Int = 3,
+        block: HttpRequestBuilder.() -> Unit,
+    ): HttpResponse {
+        val resp = client.request(block)
+        val rateLimited = consumeRateLimit(resp)
+
+        return if (rateLimited) {
+            if (maxRateLimitedRetries <= 0) return resp
+            return request(maxRateLimitedRetries - 1, block)
+        } else resp
+    }
+
+    private suspend fun paginatedRequest(
+        page: Int, amountPerPage: Int, block: HttpRequestBuilder.() -> Unit
+    ) = request {
+        parameter("page", page)
+        parameter("per_page", amountPerPage)
+        block()
+    }
+
+    /** Format a download URL for a branch archive.
+     *  [branch] can be a commit hash, in which case the proper archive URL for that commit looks a bit different.
+     */
+    // URL format see: https://docs.github.com/en/repositories/working-with-files/using-files/downloading-source-code-archives#source-code-archive-urls
+    // Note: https://api.github.com/repos/owner/mod/zipball would be an alternative. Its response is a redirect, but our lib follows that and delivers the zip just fine.
+    // Problems with the latter: Internal zip structure different, finalDestinationName would need a patch. Plus, normal URL escaping for owner/reponame does not work.
+    @Pure
+    internal fun getUrlForBranchZip(gitRepoUrl: String, branch: String) =
+        if (branch.length == 40 && branch.all { it.isHex() }) "$gitRepoUrl/archive/$branch.zip"
+        else "$gitRepoUrl/archive/refs/heads/$branch.zip"
+
+    /** Format a download URL for a release archive */
+    @Readonly
+    private fun Repo.getUrlForReleaseZip() = "$html_url/archive/refs/tags/$release_tag.zip"
+
+    /** Format a URL to query a repo tree - to calculate actual size */
+    // It's hard to see in the doc this not only accepts a commit SHA, but either branch (used here) or tag names too
+    internal suspend fun Repo.fetchReleaseZip() = request {
+        url(proxify("$baseUrl/repos/$full_name/git/trees/$default_branch"))
+        parameter("recursive", "true")
+    }
+
+    /**
+     * Wait for rate limit to end if any and returns true if there was any rate limit
+     */
+    @OptIn(ExperimentalTime::class)
+    private suspend fun consumeRateLimit(resp: HttpResponse): Boolean {
+        if (resp.status != HttpStatusCode.Forbidden && resp.status != HttpStatusCode.TooManyRequests) return false
+
+        val remainingRequests = resp.headers["x-ratelimit-remaining"]?.toIntOrNull() ?: 0
+        if (remainingRequests < 1) return false
+
+        val resetEpoch = resp.headers["x-ratelimit-reset"]?.toLongOrNull() ?: 0
+        delay(Instant.fromEpochSeconds(resetEpoch) - Clock.System.now())
+
+        return true
+    }
+
+    suspend fun fetchGithubReposWithTopic(search: String, page: Int, amountPerPage: Int) =
+        paginatedRequest(page, amountPerPage) {
+            url(proxify("$baseUrl/search/repositories"))
+            parameter("sort", "stars")
+            parameter("q", "$search topic:unciv-mod fork:true")
+        }
+
+    suspend fun fetchGithubTopics() = request {
+        url(proxify("$baseUrl/search/topics"))
+        parameter("sort", "name")
+        parameter("order", "asc")
+
+        /**
+         * `repositories:>1` means ignore unused or practically unused topics
+         */
+        parameter("q", "unciv-mod repositories:>1")
+    }
+
+    suspend fun fetchSingleRepo(owner: String, repoName: String) =
+        request { url(proxify("$baseUrl/repos/$owner/$repoName")) }
+
+    /** Query the [latest release](https://docs.github.com/en/rest/releases/releases#get-the-latest-release)
+     *  of the game repository - goes through the active download source like everything else.
+     *  @return parsed release or `null` if the request was unsuccessful
+     */
+    suspend fun fetchLatestRelease(owner: String, repoName: String): LatestRelease? {
+        val resp = request { url(proxify("$baseUrl/repos/$owner/$repoName/releases/latest")) }
+        if (!resp.status.isSuccess()) return null
+        return try {
+            json().fromJson(LatestRelease::class.java, resp.bodyAsText())
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    suspend fun fetchSingleRepoOwner(owner: String) =
+        request { url(proxify("$baseUrl/users/$owner")) }
+
+    /**
+     * We are not using KtorGithubAPI here because the URL provided is not an API URL.
+     * The host is replaced with `raw.githubusercontent.com` first, then the active
+     * download source prefix is applied (see [proxify]).
+     */
+    suspend fun fetchPreviewImageOrNull(modUrl: String, branch: String, ext: String) =
+        UncivKtor.getOrNull(proxify("$modUrl/$branch/preview.${ext}".toRawGithubUrl()))
+
+    /** Replace the URL's host with `raw.githubusercontent.com`, keeping the path */
+    private val rawHostRegex = Regex("""^https?://[^/]+""")
+    private fun String.toRawGithubUrl() = replace(rawHostRegex, "https://raw.githubusercontent.com")
+
+    //endregion
+    //region responses
+
+    /**
+     * Parsed Github repo search response
+     * @property total_count Total number of hits for the search (ignoring paging window)
+     * @property incomplete_results A flag set by github to indicate search was incomplete (never seen it on)
+     * @property items Array of [repositories][Repo]
+     * @see <a href="https://docs.github.com/en/rest/reference/search#search-repositories--code-samples">Github API doc</a>
+     */
+    class RepoSearch {
+        @Suppress("MemberVisibilityCanBePrivate")
+        var total_count = 0
+        var incomplete_results = false
+        var items = ArrayList<Repo>()
+    }
+
+    /** Part of [RepoSearch] in Github API response - one repository entry in [items][RepoSearch.items] */
+    class Repo {
+
+        /** Unlike the rest of this class, this is not part of the API but added by us locally
+         *  to track whether [getRepoSize][Github.getRepoSize] has been run successfully for this repo */
+        var hasUpdatedSize = false
+
+        /** Not part of the github schema: Explicit final zip download URL for non-github or release downloads */
+        var direct_zip_url = ""
+        /** Not part of the github schema: release tag, for debugging (DL via direct_zip_url) */
+        var release_tag = ""
+
+        var name = ""
+        var full_name = ""
+        var description: String? = null
+        var owner = RepoOwner()
+        var stargazers_count = 0
+        var default_branch = ""
+        var html_url = ""
+        var pushed_at = "" // don't use updated_at - see https://github.com/yairm210/Unciv/issues/6106
+        var size = 0
+        var topics = mutableListOf<String>()
+
+        /** String representation to be used for logging */
+        override fun toString() = name.ifEmpty { direct_zip_url }
+
+        companion object {
+            /** Create a [Repo] metadata instance from a [url], supporting various formats
+             *  from a repository landing page url to a free non-github zip download.
+             *
+             *  @see GithubAPI.parseUrl
+             *  @return `null` for invalid links or any other failures
+             */
+            suspend fun parseUrl(url: String): Repo? = Repo().parseUrl(url)
+
+            /** Query Github API for [owner]'s [repoName] repository metadata */
+            suspend fun query(owner: String, repoName: String): Repo? {
+                val resp = fetchSingleRepo(owner, repoName)
+                return if (!resp.status.isSuccess()) null
+                else json().fromJson(Repo::class.java, resp.bodyAsText())
+            }
+        }
+    }
+
+    /** Part of [Repo] in Github API response */
+    class RepoOwner {
+        var login = ""
+        var avatar_url: String? = null
+        companion object {
+            /** Query Github API for [owner]'s metadata */
+            suspend fun query(owner: String): RepoOwner? {
+                val resp = fetchSingleRepoOwner(owner)
+                return if (!resp.status.isSuccess()) null
+                else json().fromJson(RepoOwner::class.java, resp.bodyAsText())
+            }
+        }
+    }
+
+    /** One installable file attached to a release (e.g. the Windows installer or the Android APK) */
+    class ReleaseAsset {
+        var name = ""
+        var browser_download_url = ""
+    }
+
+    /** Parsed response of the "Get the latest release" GitHub API endpoint */
+    class LatestRelease {
+        var tag_name = ""
+        var html_url = ""
+        var name = ""
+        var assets = ArrayList<ReleaseAsset>()
+
+        /**
+         * List the installable assets for [platform] in preference order (one of "android",
+         * "windows", "linux", "mac" or anything else for unknown platforms).
+         * Desktop platforms offer every usable package (installer, portable zip, universal jar)
+         * so the player can choose; Android only ever gets the APK.
+         * Server jars and auxiliary helper packages are never listed.
+         */
+        @Readonly
+        fun listDownloadAssets(platform: String): List<ReleaseAsset> {
+            // Only installable player packages - never the server jar or helper files for the jar
+            val candidates = assets.filter {
+                !it.name.contains("server", ignoreCase = true)
+                    && !it.name.contains("filesforjar", ignoreCase = true)
+            }
+            fun satisfying(vararg conditions: (String) -> Boolean): List<ReleaseAsset> =
+                candidates.filter { asset ->
+                    val lower = asset.name.lowercase()
+                    conditions.all { it(lower) }
+                }
+
+            return when (platform) {
+                "android" -> satisfying({ it.endsWith(".apk") })
+                "windows" -> satisfying({ it.endsWith(".msi") }) +
+                    satisfying({ it.contains("windows64") && it.endsWith(".zip") }) +
+                    satisfying({ it.endsWith(".jar") })
+                "linux" -> satisfying({ it.contains("linux64") && it.endsWith(".zip") }) +
+                    satisfying({ it.endsWith(".jar") })
+                "mac" -> satisfying({ it.contains("mac") }) +
+                    satisfying({ it.endsWith(".jar") })
+                else -> emptyList()
+            }
+        }
+
+        /**
+         * Pick the recommended installer asset for [platform] - the first entry of
+         * [listDownloadAssets] (e.g. the MSI for Windows, the APK on Android).
+         * @return the asset to download, or `null` when nothing usable exists
+         */
+        @Readonly
+        fun pickDownloadAsset(platform: String): ReleaseAsset? = listDownloadAssets(platform).firstOrNull()
+    }
+
+    /**
+     * Download this release asset (an installer package) to [destination], reporting progress
+     * via [onProgress]. Goes through the active download source like everything else.
+     * @return `true` when the download completed successfully
+     */
+    suspend fun ReleaseAsset.downloadTo(
+        destination: FileHandle,
+        onProgress: (DownloadAndExtractState, Int?) -> Unit = { _, _ -> },
+    ): Boolean {
+        val downloadSucceeded = try {
+            UncivKtor.client.prepareRequest {
+                url(proxify(browser_download_url))
+                timeout { requestTimeoutMillis = Long.MAX_VALUE }
+                onDownload { bytesReceivedTotal, contentLength ->
+                    if (contentLength == null || contentLength <= 0L) return@onDownload
+                    val percent = (bytesReceivedTotal * 100L / contentLength).toInt()
+                    onProgress(DownloadAndExtractState.Downloading, percent.coerceIn(0, 100))
+                }
+            }.execute { resp ->
+                if (!resp.status.isSuccess()) {
+                    false
+                } else {
+                    destination.write(resp.bodyAsChannel().toInputStream(), false)
+                    true
+                }
+            }
+        } catch (_: Exception) {
+            false
+        }
+        if (downloadSucceeded) onProgress(DownloadAndExtractState.Finishing, 100)
+        return downloadSucceeded
+    }
+
+    /** Topic search response */
+    class TopicSearchResponse {
+        var items = ArrayList<Topic>()
+        class Topic {
+            var name = ""
+            var display_name: String? = null  // Would need to be curated, which is alottawork
+            var created_at = "" // iso datetime with "Z" timezone
+            var updated_at = "" // iso datetime with "Z" timezone
+        }
+    }
+
+    /** Class to receive a github API "Get a tree" response parsed as json */
+    internal class Tree {
+        class TreeFile {
+            var size: Long = 0L
+        }
+
+        @Suppress("MemberNameEqualsClassName")
+        var tree = ArrayList<TreeFile>()
+        var truncated = false
+    }
+
+    //endregion
+
+    //region Flexible URL parsing
+    /**
+     * Initialize `this` with an url, extracting all possible fields from it
+     * (html_url, author, repoName, branchName).
+     *
+     * Allow url formats:
+     * * Basic repo url:
+     *   https://github.com/author/repoName
+     * * or complete 'zip' url from github's code->download zip menu:
+     *   https://github.com/author/repoName/archive/refs/heads/branchName.zip
+     * * or the branch url same as one navigates to on github through the "branches" menu:
+     *   https://github.com/author/repoName/tree/branchName
+     * * or release tag
+     *   https://github.com/author/repoName/releases/tag/tagname
+     *   https://github.com/author/repoName/archive/refs/tags/tagname.zip
+     *
+     * In the case of the basic repo url, an [API query](https://docs.github.com/en/rest/repos/repos#get-a-repository) is sent to determine the default branch.
+     * Other url forms will not go online.
+     *
+     * @return a new Repo instance for the 'Basic repo url' case, otherwise `this`, modified, to allow chaining, `null` for invalid links or any other failures
+     * @see <a href="https://docs.github.com/en/rest/repos/repos#get-a-repository--code-samples">Github API Repository Code Samples</a>
+     */
+    private suspend fun Repo.parseUrl(url: String): Repo? {
+        fun processMatch(matchResult: MatchResult): Repo {
+            html_url = matchResult.groups[1]!!.value
+            owner.login = matchResult.groups[2]!!.value
+            name = matchResult.groups[3]!!.value
+            default_branch = matchResult.groups[4]!!.value
+            return this
+        }
+
+        html_url = url
+        default_branch = "master"
+        val matchZip = Regex("""^(.*/(.*)/(.*))/archive/(?:.*/)?heads/([^.]+).zip$""").matchEntire(url)
+        if (matchZip != null && matchZip.groups.size > 4)
+            return processMatch(matchZip)
+
+        val matchBranch = Regex("""^(.*/(.*)/(.*))/tree/(.+?)/?$""").matchEntire(url) // important non-greedy '+'
+        if (matchBranch != null && matchBranch.groups.size > 4)
+            return processMatch(matchBranch)
+
+        // Releases and tags -
+        // TODO Query for latest release and save as Mod Version?
+        // https://docs.github.com/en/rest/releases/releases#get-the-latest-release
+        // TODO Query a specific release for its name attribute - the page will link the tag
+        // https://docs.github.com/en/rest/releases/releases#get-a-release-by-tag-name
+
+        val matchTagArchive = Regex("""^(.*/(.*)/(.*))/archive/(?:.*/)?tags/(.+).zip$""").matchEntire(url)
+        if (matchTagArchive != null && matchTagArchive.groups.size > 4) {
+            processMatch(matchTagArchive)
+            release_tag = default_branch
+            // leave default_branch even if it's actually a tag not a branch name
+            // so the suffix of the inner first level folder inside the zip can be removed later
+            direct_zip_url = url
+            return this
+        }
+        val matchTagPage = Regex("""^(.*/(.*)/(.*))/releases/(?:.*/)?tag/(.+?)/?$""").matchEntire(url) // important non-greedy '+'
+        if (matchTagPage != null && matchTagPage.groups.size > 4) {
+            processMatch(matchTagPage)
+            release_tag = default_branch
+            direct_zip_url = getUrlForReleaseZip()
+            return this
+        }
+
+        val matchCommit = Regex("""^(.*/(.*)/(.*))/archive/([0-9a-z]{40})\.zip$""").matchEntire(url)
+        if (matchCommit != null && matchCommit.groups.size > 4) {
+            processMatch(matchCommit)
+            // the commit hash is now in the default_branch field - let's leave it at that
+            direct_zip_url = url
+            return this
+        }
+
+        val matchRepo = Regex("""^.*//.*/(.+)/(.+?)/?$""").matchEntire(url) // important non-greedy '+'
+        if (matchRepo != null && matchRepo.groups.size > 2) {
+            // Query API if we got the 'https://github.com/author/repoName' URL format to get the correct default branch
+            val repo = Repo.query(matchRepo.groups[1]!!.value, matchRepo.groups[2]!!.value)
+            if (repo != null) return repo
+        }
+
+        // Only complain about invalid link if it isn't a http protocol (to think about: android document protocol? file protocol?)
+        if (!url.startsWith("http://") && !url.startsWith("https://"))
+            return null
+
+        // From here, we'll always return success and treat the url as direct-downloadable zip.
+        // The Repo instance will be a pseudo-repo not corresponding to an actual github repo.
+        html_url = ""
+        direct_zip_url = url
+        owner.login = "-unknown-"
+        default_branch = "master" // only used to remove this suffix should the zip contain a inner folder
+        // But see if we can extract a file name from the url
+        // Will use filename from response headers, if content-disposition is sent, for the Mod name instead, done in downloadAndExtract
+        val matchAnyZip = Regex("""^.*//(?:.*/)*([^/]+\.zip)$""").matchEntire(url)
+        if (matchAnyZip != null && matchAnyZip.groups.size > 1)
+            name = matchAnyZip.groups[1]!!.value
+        full_name = name
+        return this
+    }
+    //endregion
+
+    /**
+     * Download a mod and extract, deleting any pre-existing version.
+     * @param modsFolder Destination handle of mods folder - also controls Android internal/external.
+     * @param updateProgressPercent A function recieving a download progress percentage (0-100) roughly every 100ms. Call will run under a Coroutine context.
+     * @author **Warning**: This took a long time to get just right, so if you're changing this, ***TEST IT THOROUGHLY*** on _both_ Desktop _and_ Phone.
+     * @return FileHandle for the downloaded Mod's folder or null if download failed.
+     */
+    suspend fun Repo.downloadAndExtract(
+        /** Should accept a number 0-100 */
+        updateProgressPercent: ((DownloadAndExtractState, Int?) -> Unit)? = null
+    ): FileHandle? {
+        val modsFolder = UncivGame.Current.files.getModsFolder()
+        
+        var modNameFromFileName = name
+
+        val defaultBranch = default_branch
+        val zipUrl: String
+        val tempName: String
+        if (direct_zip_url.isEmpty()) {
+            val gitRepoUrl = html_url
+            // Initiate download - the helper returns null when it fails
+            zipUrl = getUrlForBranchZip(gitRepoUrl, defaultBranch)
+
+            // Get a mod-specific temp file name
+            tempName = "temp-" + gitRepoUrl.hashCode().toString(16)
+        } else {
+            zipUrl = direct_zip_url
+            tempName = "temp-" + toString().hashCode().toString(16)
+        }
+
+        // If the Content-Length header was missing, fall back to the reported repo size (which should be in kB)
+        // and assume low compression efficiency - bigger mods typically have mostly images.
+        val fallbackSize = size.toLong() * 1024L * 4L / 5L
+        @Pure
+        fun reportProgress(bytesReceivedTotal: Long, contentLength: Long?) {
+            val progressEndsAtSize = contentLength ?: fallbackSize
+            if (progressEndsAtSize <= 0L) return
+            val percent = bytesReceivedTotal * 100L / progressEndsAtSize
+            val state = if (percent > 101L) DownloadAndExtractState.Finishing else DownloadAndExtractState.Downloading
+            updateProgressPercent!!(state, percent.toInt())
+        }
+
+        val unzipDestination = modsFolder.child(tempName)
+        // prevent mixing new content with old - hopefully there will never be cadavers of our tempZip stuff
+        if (unzipDestination.exists())
+            if (unzipDestination.isDirectory) unzipDestination.deleteDirectory() else unzipDestination.delete()
+
+        // Thanks to: https://stackoverflow.com/a/74328603/10585461
+        UncivKtor.client.prepareRequest {
+            url(proxify(zipUrl))
+            timeout { requestTimeoutMillis = Long.MAX_VALUE }
+            if (updateProgressPercent != null) onDownload(::reportProgress)
+        }.execute { resp ->
+            /**
+             * This block is borrowed from the deleted method `processRequestHandlingRedirects()`
+             * See: https://github.com/yairm210/Unciv/blob/1cb3f94d36009719b63f6d8e9d2e49c1bd594a8f/core/src/com/unciv/logic/github/Github.kt#L197-L216
+             */
+            when {
+                resp.status == HttpStatusCode.NotFound ->
+                    throw UncivShowableException("Mod archive not found")
+
+                (resp.status == HttpStatusCode.Forbidden) &&
+                    resp.headers["CF-RAY"] != null && resp.headers["cf-mitigated"].orEmpty() == "challenge" ->
+                    throw UncivShowableException("Blocked by Cloudflare")
+
+                (resp.status.value in 401..403) || resp.status == HttpStatusCode.ProxyAuthenticationRequired ->
+                    throw UncivShowableException("Servers requiring authentication are not supported")
+
+                resp.status.value in 300..499 ->
+                    throw UncivShowableException("Unexpected response: [${resp.bodyAsText()}]")
+
+                resp.status.value in 500..599 ->
+                    throw UncivShowableException("Server failure: [${resp.bodyAsText()}}]")
+
+                !resp.status.isSuccess() ->
+                    throw UncivShowableException("Unknown Issue!\nStatus: ${resp.status}\nBody:[${resp.bodyAsText()}}]")
+            }
+
+            val disposition = resp.headers[HttpHeaders.ContentDisposition]
+            modNameFromFileName = parseNameFromDisposition(disposition, modNameFromFileName)
+
+            val stream = resp.bodyAsChannel().toInputStream()
+            ZipInputStream(stream).use { zipstream ->
+                extractZipStream(zipstream, unzipDestination)
+            }
+        }
+
+        if (unzipDestination.exists() && unzipDestination.list().isEmpty()) {
+            unzipDestination.deleteDirectory()
+            return null
+        }
+
+        val (innerFolder, modName) = resolveZipStructure(unzipDestination, modNameFromFileName)
+
+        // modName can be "$repoName-$defaultBranch"
+        val finalDestinationName = modName.replace("-$defaultBranch", "").repoNameToFolderName()
+        // finalDestinationName is now the mod name as we display it. Folder name needs to be identical.
+        val finalDestination = modsFolder.child(finalDestinationName)
+
+        // prevent mixing new content with old
+        var tempBackup: FileHandle? = null
+        if (finalDestination.exists()) {
+            tempBackup = finalDestination.sibling("$finalDestinationName.updating")
+            finalDestination.renameOrMove(tempBackup)
+        }
+
+        // Move temp unpacked content to their final place
+        finalDestination.mkdirs() // If we don't create this as a directory, it will think this is a file and nothing will work.
+        // The move will reset the last modified time (recursively, at least on Linux)
+        // This sort will guarantee the desktop launcher will not re-pack textures and overwrite the atlas as delivered by the mod
+        for (innerFileOrFolder in innerFolder.list()
+            .sortedBy { file -> file.extension() == "atlas" }) {
+            innerFileOrFolder.renameOrMove(finalDestination)
+        }
+
+        // clean up
+        unzipDestination.deleteDirectory()
+        if (tempBackup != null)
+            if (tempBackup.isDirectory) tempBackup.deleteDirectory() else tempBackup.delete()
+
+        Github.rewriteModOptions(this, finalDestination)
+        return finalDestination
+    }
+
+    private suspend fun extractZipStream(stream: ZipInputStream, unzipDestination: FileHandle) {
+        // Note: resolveZipStructure re-iterates the content from the file system. We might do that here,
+        // or keep the names for reuse, but that's complicated. Perf gains might not be worth it.
+
+        val job = coroutineContext[Job]
+        val destinationPath = unzipDestination.file().canonicalPath + File.separator
+        // Actual unpacking
+        try {
+            while (job?.isActive != false) {
+                val entry = stream.nextEntry ?: break
+                if (entry.isDirectory) continue  // means we're not creating empty subdirectories, the subdirectory's contents come in other entries
+                val dest = unzipDestination.child(entry.name).file().canonicalFile
+                if (!dest.path.startsWith(destinationPath))
+                    throw ZipException("ZIP entry points outside the destination")
+                dest.parentFile?.mkdirs() // Gdx `parent` would hide the null Java delivers when at root
+                dest.outputStream().use { stream.copyTo(it) }
+                stream.closeEntry()
+            }
+        } catch (ex: ZipException) {
+            throw UncivShowableException("That is not a valid ZIP file", ex)
+        }
+    }
+
+    private val parseAttachmentDispositionRegex =
+        Regex("""attachment;\s*filename\s*=\s*(["'])?(.*?)\1(;|$)""")
+
+    @Pure
+    private fun parseNameFromDisposition(disposition: String?, default: String): String {
+        @Pure
+        fun String.removeZipExtension() = removeSuffix(".zip").replace('.', ' ')
+        if (disposition == null) return default.removeZipExtension()
+        val match = parseAttachmentDispositionRegex.matchAt(disposition, 0)
+            ?: return default.removeZipExtension()
+        return match.groups[2]!!.value.removeZipExtension()
+    }
+
+    private fun FileHandle.renameOrMove(dest: FileHandle) {
+        // Gdx tries a java rename for Absolute and External, but NOT for Local - rectify that
+        if (type() == Files.FileType.Local) {
+            // See #5346: renameTo 'unpacks' a source folder if the destination exists and is an
+            // empty folder, dropping the name of the source entirely.
+            // Safer to ask for a move to the not-yet-existing full resulting path instead.
+            if (isDirectory)
+                if (file().renameTo(dest.child(name()).file())) return
+                else
+                    if (file().renameTo(dest.file())) return
+        }
+        moveTo(dest)
+    }
+
+    @Pure
+    private fun regexListOf(vararg pattern: String) =
+        pattern.map { Regex(it, RegexOption.IGNORE_CASE) }
+
+    private val goodFolders = regexListOf(
+        "Images",
+        "jsons",
+        "maps",
+        "music",
+        "scenarios",
+        "sounds",
+        "voices",
+        "Images\\..*",
+        "\\.github"
+    )
+    private val goodFiles = regexListOf(
+        ".*\\.atlas",
+        ".*\\.png",
+        "preview.jpg",
+        ".*\\.md",
+        "Atlases.json",
+        "\\.nomedia",
+        "license"
+    )
+
+    private fun isValidModFolder(dir: FileHandle): Boolean {
+        var good = 0
+        var bad = 0
+        for (file in dir.list()) {
+            val goodList = if (file.isDirectory) goodFolders else goodFiles
+            if (goodList.any { file.name().matches(it) }) good++ else bad++
+        }
+        return good > 0 && good > bad
+    }
+
+    /** Check whether the unpacked zip contains a subfolder with mod content or is already the mod.
+     *  If there's a subfolder we'll assume it is the mod name, optionally suffixed with branch or release-tag name like github does.
+     *  @return Pair: actual mod content folder to name (subfolder name or [defaultModName])
+     */
+    private fun resolveZipStructure(
+        dir: FileHandle,
+        defaultModName: String
+    ): Pair<FileHandle, String> {
+        if (isValidModFolder(dir))
+            return dir to defaultModName
+        val subdirs = dir.list(FileFilter { it.isDirectory })
+        if (subdirs.size != 1 || !isValidModFolder(subdirs[0]))
+            throw UncivShowableException("Invalid Mod archive structure")
+        return subdirs[0] to choosePrettierName(subdirs[0].name(), defaultModName)
+    }
+
+    @Pure
+    private fun choosePrettierName(folderName: String, defaultModName: String): String {
+        // Special case for specific commit (getting an older point-in-time version of a mod) zips
+        if (defaultModName.all { it.isHex() } && folderName.endsWith(defaultModName)) {
+            return folderName.removeSuffix(defaultModName).removeSuffix("-")
+        }
+
+        @Pure
+        fun String.isMixedCase() = this != lowercase() && this != uppercase()
+        if (defaultModName.startsWith(
+                folderName,
+                true
+            ) && defaultModName.isMixedCase() && !folderName.isMixedCase()
+        )
+            return defaultModName.removeSuffix("-main").removeSuffix("-master")
+        return folderName
+    }
+
+    // kotlin's isHexLetter and isAsciiDigit are private
+    @Pure
+    private fun Char.isHex() = ((this - '0') and 0xFFFF) < 10 || ((this - 'A') and 0xFFDF) < 6
+}

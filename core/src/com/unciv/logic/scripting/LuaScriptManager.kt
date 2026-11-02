@@ -1,0 +1,503 @@
+package com.unciv.logic.scripting
+
+import com.badlogic.gdx.files.FileHandle
+import yairm210.purity.annotations.Readonly
+import com.unciv.logic.civilization.AlertType
+import com.unciv.logic.civilization.Civilization
+import com.unciv.logic.civilization.PopupAlert
+import com.unciv.models.ruleset.Ruleset
+import com.unciv.models.ruleset.unique.Countables
+import com.unciv.models.ruleset.unique.GameContext
+import com.unciv.utils.Log
+import org.luaj.vm2.Globals
+import org.luaj.vm2.LuaError
+import org.luaj.vm2.LuaFunction
+import org.luaj.vm2.LuaValue
+import org.luaj.vm2.Varargs
+import org.luaj.vm2.lib.DebugLib
+import org.luaj.vm2.lib.jse.JsePlatform
+
+fun luaFunction(block: (Varargs) -> LuaValue): LuaFunction {
+    return object : LuaFunction() {
+        override fun call(): LuaValue = block(LuaValue.NONE)
+        override fun call(arg: LuaValue): LuaValue = block(arg)
+        override fun call(arg1: LuaValue, arg2: LuaValue): LuaValue = block(LuaValue.varargsOf(arg1, arg2))
+        override fun call(arg1: LuaValue, arg2: LuaValue, arg3: LuaValue): LuaValue =
+            block(LuaValue.varargsOf(arg1, arg2, arg3))
+
+        /**
+         * CRITICAL: luaj's [LuaClosure] uses [LuaValue.invoke] for any call whose argument list
+         * contains a function call expression (e.g. `ctx.store.set("k", tostring(1))`), while plain
+         * literal arguments use the [call] overloads above. The base [LuaFunction] does not override
+         * invoke, so it falls through to [LuaValue.callmt] which looks up the `__call` metamethod -
+         * absent for custom LuaFunction subclasses (luaj only installs it for its own LibFunctions via
+         * the debug library) - throwing "attempt to call function" at runtime.
+         * Overriding invoke here fixes every `foo(bar())` style call in mod scripts.
+         */
+        override fun invoke(varargs: Varargs): Varargs = block(varargs)
+    }
+}
+
+/** Metadata for a Lua map script discovered via [LuaScriptManager.getMapScripts]. */
+data class MapScriptInfo(
+    val modName: String,
+    /** Display name shown in the map type dropdown. */
+    val name: String,
+    /** Description shown as tooltip. */
+    val description: String
+) {
+    /** Fully qualified reference string: "modName:GenerateMap". */
+    val ref get() = "$modName:GenerateMap"
+}
+
+object LuaScriptManager {
+
+    private val luaFunctionRefRegex = Regex("^[a-zA-Z_]\\w*(:[a-zA-Z_]\\w*)?$")
+    private val countableRegex = Regex("\\[[^]]+\\]")
+
+    /**
+     * Maximum length of a string that `string.rep` is allowed to produce. The instruction budget
+     * counts VM instructions, not memory, so without this a single call like
+     * `string.rep("a", 2 ^ 31)` can allocate gigabytes and take the whole game down with an
+     * [OutOfMemoryError] (which the `catch (Exception)` handlers around script calls do not catch).
+     * Legitimate map and text generation stays far below 64 MB.
+     */
+    private const val MAX_LUA_STRING_REP_LENGTH = 64L * 1024 * 1024
+
+    /**
+     * Maximum number of Lua bytecode instructions a single script load (top-level execution)
+     * or a single function call may execute. Guards against accidental or malicious infinite
+     * loops (e.g. `while true do end`) that would otherwise hang the game's main thread forever.
+     * luaj's interpreter executes on the order of a few million instructions per second, so this
+     * budget limits one call to roughly a second of CPU time - far more than any sane mod logic.
+     */
+    private const val INSTRUCTION_BUDGET = 10_000_000L
+
+    /**
+     * Instruction-counting debug library installed on every sandboxed globals.
+     * The luaj VM calls [onInstruction] for every executed bytecode instruction, which lets us
+     * interrupt runaway loops. We deliberately override all three VM callbacks ([onCall],
+     * [onInstruction], [onReturn]) without touching the superclass' internal `globals` field,
+     * so no `debug.*` library is exposed to the mod (the [DebugLib] superclass would otherwise
+     * register `debug` into the globals table, which the sandbox explicitly forbids).
+     */
+    private class InstructionBudgetDebugLib : DebugLib() {
+        private var instructionCount = 0L
+        private var budget = 0L
+
+        fun reset(budget: Long) {
+            instructionCount = 0L
+            this.budget = budget
+        }
+
+        override fun onCall(closure: org.luaj.vm2.LuaClosure, varargs: Varargs, stack: Array<LuaValue>) {
+            checkBudget()
+        }
+
+        /** BaseLib.pcall invokes this single-argument overload; the default reads this.globals (null here). */
+        override fun onCall(function: LuaFunction) {
+            checkBudget()
+        }
+
+        override fun onInstruction(pc: Int, v: Varargs, top: Int) {
+            checkBudget()
+        }
+
+        override fun onReturn() {
+            checkBudget()
+        }
+
+        /**
+         * The luaj VM calls [DebugLib.traceback] from `LuaClosure.errorHook` whenever a script
+         * throws, and the base implementation reads `this.globals` - which we never initialize
+         * (initializing it via the superclass `call` would register the `debug.*` library into
+         * the sandbox). Returning an empty traceback keeps the original error message intact.
+         */
+        override fun traceback(level: Int): String = ""
+
+        private fun checkBudget() {
+            if (++instructionCount > budget)
+                throw LuaError("Lua execution budget exceeded - possible infinite loop")
+        }
+    }
+
+    /** Per-mod instruction budgets, reset before every top-level load and every function call. */
+    private val modInstructionBudgets = java.util.concurrent.ConcurrentHashMap<String, InstructionBudgetDebugLib>()
+
+    /** Globals per mod for sandbox isolation */
+    private val modGlobals = java.util.concurrent.ConcurrentHashMap<String, Globals>()
+
+    // Cache for getKnownFunctions, invalidated by clear/clearMod
+    private var cachedKnownFunctions: Set<String>? = null
+    private var cachedKnownFunctionsRuleset: Ruleset? = null
+
+    // Dedup set to prevent showing the same Lua error popup repeatedly in one session
+    private val shownLuaErrors = HashSet<String>()
+
+    fun clear() {
+        modGlobals.clear()
+        modInstructionBudgets.clear()
+        cachedKnownFunctions = null
+        cachedKnownFunctionsRuleset = null
+        shownLuaErrors.clear()
+        // A ruleset reload replaces ruleset.luaErrors, so the per-function dedup sets must be reset
+        // too - otherwise a function whose error was already reported once would stay silent for
+        // the rest of the process, hiding a real error in the reloaded mod.
+        reportedValueHookErrors.clear()
+        reportedTableHookErrors.clear()
+    }
+
+    fun clearMod(modName: String) {
+        modGlobals.remove(modName)
+        modInstructionBudgets.remove(modName)
+        cachedKnownFunctions = null
+        cachedKnownFunctionsRuleset = null
+        shownLuaErrors.clear()
+        reportedValueHookErrors.clear()
+        reportedTableHookErrors.clear()
+    }
+
+    fun isModLoaded(modName: String) = modGlobals.containsKey(modName)
+
+    fun getKnownFunctions(ruleset: Ruleset): Set<String> {
+        if (cachedKnownFunctions != null && cachedKnownFunctionsRuleset === ruleset)
+            return cachedKnownFunctions!!
+
+        val functions = HashSet<String>()
+        for ((modName, g) in modGlobals) {
+            // When mods is populated (combined ruleset), only consider functions from mods in the ruleset.
+            // When mods is empty (standalone mod loaded via loadSingleRuleset), consider all loaded functions.
+            if (ruleset.mods.isNotEmpty() && modName !in ruleset.mods) continue
+            for (key in g.keys()) {
+                val v = g.get(key)
+                if (v !is org.luaj.vm2.LuaClosure) continue
+                functions.add(key.tojstring())
+            }
+        }
+        cachedKnownFunctions = functions
+        cachedKnownFunctionsRuleset = ruleset
+        return functions
+    }
+
+    fun loadScripts(folderHandle: FileHandle, modName: String, ruleset: Ruleset): List<String> {
+        val scriptsDir = folderHandle.child("scripts")
+        if (!scriptsDir.exists() || !scriptsDir.isDirectory) {
+            Log.debug("Lua: no scripts/ directory found for mod $modName")
+            return emptyList()
+        }
+
+        val globals = createSandboxedGlobals(modName)
+        modGlobals[modName] = globals
+
+        val budget = modInstructionBudgets[modName] ?: InstructionBudgetDebugLib().also {
+            modInstructionBudgets[modName] = it
+        }
+        // Must be re-attached on every load: a mod reload creates fresh globals, and without
+        // this the new globals would never call checkBudget(), so a `while true do end` in a
+        // reloaded mod would hang the main thread forever.
+        globals.debuglib = budget
+
+        val loaded = ArrayList<String>()
+
+        // Phase 1: compile & execute all .lua files to define functions in globals
+        for (file in scriptsDir.list()) {
+            if (file.extension() != "lua") continue
+            try {
+                val source = file.readString(Charsets.UTF_8.name())
+                val chunk = globals.load(source, file.name())
+                budget.reset(INSTRUCTION_BUDGET)
+                chunk.call() // Execute chunk so function definitions are registered
+                loaded += file.nameWithoutExtension()
+                Log.debug("Lua: loaded script ${file.name()} for mod $modName")
+            } catch (ex: LuaError) {
+                Log.error("Lua syntax error in ${file.name()}: ${ex.message}")
+                val lineNum = extractLineNumber(ex.message)
+                val msg = if (lineNum != null)
+                    "Lua script '${file.name()}' has a syntax error at line $lineNum: ${ex.message}"
+                else
+                    "Lua script '${file.name()}' has a syntax error: ${ex.message}"
+                ruleset.luaErrors.add(LuaScriptError(modName, file.name(), LuaScriptErrorSeverity.ERROR, msg, lineNum))
+            } catch (ex: Exception) {
+                Log.error("Failed to load Lua script ${file.name()}: ${ex.message}")
+                ruleset.luaErrors.add(LuaScriptError(
+                    modName, file.name(), LuaScriptErrorSeverity.ERROR,
+                    "Failed to load Lua script '${file.name()}': ${ex.message}"
+                ))
+            }
+        }
+
+        if (loaded.isNotEmpty()) {
+            ruleset.luaErrors.add(LuaScriptError(
+                modName, null, LuaScriptErrorSeverity.INFO,
+                "Loaded ${loaded.size} Lua script(s) for mod '$modName': ${loaded.joinToString(", ")}"
+            ))
+        }
+
+        Log.debug("Lua: loaded ${loaded.size} scripts for mod $modName: $loaded")
+
+        return loaded
+    }
+
+    fun getFunction(modName: String, functionName: String): Pair<String, LuaFunction>? {
+        if (modName.isNotEmpty()) {
+            // An explicit "mod:function" reference must resolve inside that mod only.
+            // Falling back to other mods here would silently run a same-named function
+            // from an unrelated mod, breaking mod isolation.
+            val func = modGlobals[modName]?.get(functionName)
+            if (func != null && func != LuaValue.NIL && func is LuaFunction)
+                return modName to func
+            Log.debug("Lua: function '$functionName' not found in mod '$modName'")
+            return null
+        }
+        // No mod qualifier: search all mod globals.
+        for ((name, g) in modGlobals) {
+            val func = g.get(functionName)
+            if (func != LuaValue.NIL && func is LuaFunction)
+                return name to func
+        }
+        Log.debug("Lua: function '$functionName' not found in any loaded mod (mod: '$modName')")
+        return null
+    }
+
+    fun callFunction(
+        func: LuaFunction,
+        ctxTable: LuaValue,
+        civInfo: Civilization? = null,
+        functionName: String = "",
+        onSuccess: (Boolean) -> Unit,
+        modName: String = ""
+    ) {
+        // Reset the mod's instruction budget so a previous runaway script can't poison later calls
+        modInstructionBudgets[modName]?.reset(INSTRUCTION_BUDGET)
+        try {
+            val result = func.call(ctxTable)
+            val success = result.toboolean(1)
+            onSuccess(success)
+        } catch (ex: LuaError) {
+            Log.error("Lua runtime error: ${ex.message}", ex)
+            reportLuaError(civInfo, functionName, ex.message ?: "Unknown Lua runtime error", modName)
+            onSuccess(false)
+        } catch (ex: Exception) {
+            Log.error("Unexpected Lua error: ${ex.message}", ex)
+            reportLuaError(civInfo, functionName, ex.message ?: "Unknown error", modName)
+            onSuccess(false)
+        }
+    }
+
+    /**
+     * Calls [func] with [ctxTable] and delivers its numeric return value, unlike [callFunction]
+     * which only reports boolean success. [onResult] receives null when the function returns
+     * nil/non-number or throws - the caller then treats the value as "unchanged". Used by the
+     * combat strength/damage hooks, which run on the hot path, so error reporting is deduplicated
+     * per function name to avoid flooding the mod checker during AI turn processing.
+     */
+    private val reportedValueHookErrors = HashSet<String>()
+
+    /** Like [callFunctionForValue], but delivers the raw Lua return value - null on
+     *  nil/error/absent. Used by the tile yield hook, whose result is a stats table. */
+    private val reportedTableHookErrors = HashSet<String>()
+
+    fun callFunctionForLuaValue(
+        func: LuaFunction,
+        ctxTable: LuaValue,
+        civInfo: Civilization? = null,
+        functionName: String = "",
+        modName: String = "",
+        onResult: (LuaValue?) -> Unit
+    ) {
+        modInstructionBudgets[modName]?.reset(INSTRUCTION_BUDGET)
+        try {
+            val result = func.call(ctxTable)
+            onResult(if (result.isnil()) null else result)
+        } catch (ex: LuaError) {
+            Log.error("Lua runtime error: ${ex.message}", ex)
+            if (reportedTableHookErrors.add(functionName))
+                reportLuaError(civInfo, functionName, ex.message ?: "Unknown Lua runtime error", modName)
+            onResult(null)
+        } catch (ex: Exception) {
+            Log.error("Unexpected Lua error: ${ex.message}", ex)
+            if (reportedTableHookErrors.add(functionName))
+                reportLuaError(civInfo, functionName, ex.message ?: "Unknown error", modName)
+            onResult(null)
+        }
+    }
+
+    fun callFunctionForValue(
+        func: LuaFunction,
+        ctxTable: LuaValue,
+        civInfo: Civilization? = null,
+        functionName: String = "",
+        modName: String = "",
+        onResult: (Double?) -> Unit
+    ) {
+        modInstructionBudgets[modName]?.reset(INSTRUCTION_BUDGET)
+        try {
+            val result = func.call(ctxTable)
+            onResult(if (result.isnumber()) result.todouble() else null)
+        } catch (ex: LuaError) {
+            Log.error("Lua runtime error: ${ex.message}", ex)
+            if (reportedValueHookErrors.add(functionName))
+                reportLuaError(civInfo, functionName, ex.message ?: "Unknown Lua runtime error", modName)
+            onResult(null)
+        } catch (ex: Exception) {
+            Log.error("Unexpected Lua error: ${ex.message}", ex)
+            if (reportedValueHookErrors.add(functionName))
+                reportLuaError(civInfo, functionName, ex.message ?: "Unknown error", modName)
+            onResult(null)
+        }
+    }
+
+    private fun reportLuaError(civInfo: Civilization?, functionName: String, message: String, modName: String = "") {
+        val lineNum = extractLineNumber(message)
+        val displayMessage = if (functionName.isNotEmpty())
+            if (lineNum != null)
+                "Function '$functionName' error at line $lineNum:|$message"
+            else
+                "Function '$functionName' error:|$message"
+        else
+            message
+
+        // Record the error in the ruleset's error list so mod authors can see it in the
+        // in-game mod checker - regardless of whether the triggering civ is human (AI-turn
+        // errors previously only went to the log and were invisible to mod authors).
+        val ruleset = civInfo?.gameInfo?.ruleset
+        if (ruleset != null) {
+            ruleset.luaErrors.add(LuaScriptError(
+                modName, null, LuaScriptErrorSeverity.WARNING,
+                "Runtime Lua error: $displayMessage", lineNum
+            ))
+        }
+
+        if (civInfo == null || !civInfo.isHuman()) return
+        val errorKey = if (functionName.isNotEmpty()) functionName else message
+        if (!shownLuaErrors.add(errorKey)) return // Already shown this error in this session
+        civInfo.popupAlerts.add(PopupAlert(AlertType.LuaError, displayMessage))
+    }
+
+    fun resolveCountablesInString(raw: String, gameContext: GameContext): String {
+        if (!raw.contains('[')) return raw
+        return countableRegex.replace(raw) { match ->
+            val expression = match.value
+            val result = Countables.getCountableAmount(expression, gameContext)
+            result?.toString() ?: expression
+        }
+    }
+
+    fun parseLuaRef(luaRef: String): Pair<String, String> {
+        val parts = luaRef.split(":", limit = 2)
+        return if (parts.size == 2) parts[0] to parts[1]
+        else "" to parts[0]
+    }
+
+    @Readonly fun isValidFunctionRef(ref: String): Boolean = luaFunctionRefRegex.matches(ref)
+
+    // region Map scripts
+
+    /**
+     * Functions reserved for map generation scripts.
+     * These must NOT be called via [UniqueType.TriggerLuaFunction] in-game,
+     * as they are designed to manipulate the TileMap during generation only.
+     */
+    private val mapGenReservedFunctions = setOf("GetMapScriptInfo", "GenerateMap")
+
+    /** Returns true if [functionName] is reserved for map generation and cannot be used in TriggerLuaFunction. */
+    fun isMapGenFunction(functionName: String): Boolean =
+        functionName in mapGenReservedFunctions
+
+    /**
+     * Discovers all Lua map scripts from the currently loaded mods in [ruleset].
+     * A map script is a Lua file that defines both [GetMapScriptInfo] (returning metadata)
+     * and [GenerateMap] (the generator function).
+     */
+    fun getMapScripts(ruleset: Ruleset): List<MapScriptInfo> {
+        val scripts = mutableListOf<MapScriptInfo>()
+        for ((modName, globals) in modGlobals) {
+            if (ruleset.mods.isNotEmpty() && modName !in ruleset.mods) continue
+
+            val infoFunc = globals.get("GetMapScriptInfo")
+            if (infoFunc == LuaValue.NIL || infoFunc !is LuaFunction) continue
+
+            val genFunc = globals.get("GenerateMap")
+            if (genFunc == LuaValue.NIL || genFunc !is LuaFunction) continue
+
+            try {
+                modInstructionBudgets[modName]?.reset(INSTRUCTION_BUDGET)
+                val result = infoFunc.call()
+                if (!result.istable()) continue
+                val table = result.checktable()
+                val name = table.get("name").tojstring()
+                val description = table.get("description")?.tojstring() ?: ""
+                if (name.isNotEmpty())
+                    scripts.add(MapScriptInfo(modName, name, description))
+            } catch (ex: Exception) {
+                Log.error("Lua: error calling GetMapScriptInfo for mod $modName: ${ex.message}")
+            }
+        }
+        return scripts
+    }
+
+    // endregion
+
+    private fun extractLineNumber(message: String?): Int? {
+        if (message == null) return null
+        val regex = Regex(""":(\d+):""")
+        return regex.find(message)?.groupValues?.get(1)?.toIntOrNull()
+    }
+
+    private fun createSandboxedGlobals(modName: String): Globals {
+        val globals = JsePlatform.standardGlobals()
+
+        // Remove dangerous standard libraries and functions
+        for (dangerous in listOf(
+            "os", "io", "luajava",
+            "dofile", "loadfile", "load", "loadstring",
+            "require", "collectgarbage", "module",
+            "rawget", "rawset", "rawequal", "rawlen",
+            "setmetatable", "getmetatable", "newproxy",
+            "debug", "coroutine",
+            // The package library must go entirely: its `package.loaded` table keeps full
+            // references to `io`, `os`, `luajava` and `coroutine` even after the globals above
+            // are set to nil, giving mod scripts complete sandbox escape (arbitrary file
+            // read/write, process execution and Java reflection via luajava).
+            "package"
+        )) {
+            globals.set(dangerous, LuaValue.NIL)
+        }
+
+        // Remove string.dump for sandbox safety (prevents bytecode exfiltration), and cap
+        // string.rep so a single call cannot exhaust memory (see MAX_LUA_STRING_REP_LENGTH).
+        val stringLib = globals.get("string")
+        if (stringLib is org.luaj.vm2.LuaTable) {
+            stringLib.set("dump", LuaValue.NIL)
+            val originalRep = stringLib.get("rep")
+            if (!originalRep.isnil()) {
+                stringLib.set("rep", luaFunction { args ->
+                    val text = args.arg(1).checkjstring()
+                    val repetitions = args.arg(2).checkint()
+                    if (repetitions > 0 && text.length.toLong() * repetitions > MAX_LUA_STRING_REP_LENGTH)
+                        throw LuaError(
+                            "string.rep result too large - possible memory exhaustion " +
+                                "(max $MAX_LUA_STRING_REP_LENGTH characters)"
+                        )
+                    originalRep.invoke(args).arg1()
+                })
+            }
+        }
+
+        // Thread-safety note: nothing in this package synchronizes access to the per-mod Globals
+        // or to the mutable state above. Lua can be invoked both from the GL/render thread and from
+        // background threads (e.g. WorldScreen's "NextTurn" task pool), so concurrent calls into a
+        // single mod's Globals are possible. Adding a lock here would block the render thread on
+        // long-running background scripts, which was judged worse than the (unproven) risk of
+        // concurrent-state corruption; this is a known, accepted limitation.
+
+        // Redirect print to game log
+        globals.set("print", luaFunction { args ->
+            val items = (1..args.narg()).map { args.arg(it).tojstring() }
+            Log.debug("Lua[$modName]: ${items.joinToString("\t")}")
+            LuaValue.NIL
+        })
+
+        return globals
+    }
+}

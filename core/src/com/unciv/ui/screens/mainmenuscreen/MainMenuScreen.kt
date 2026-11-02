@@ -1,0 +1,811 @@
+package com.unciv.ui.screens.mainmenuscreen
+
+import com.badlogic.gdx.Application
+import com.badlogic.gdx.Gdx
+import com.badlogic.gdx.files.FileHandle
+import com.badlogic.gdx.graphics.Color
+import com.badlogic.gdx.scenes.scene2d.Touchable
+import com.badlogic.gdx.scenes.scene2d.actions.Actions
+import com.badlogic.gdx.scenes.scene2d.ui.Label
+import com.badlogic.gdx.scenes.scene2d.ui.Stack
+import com.badlogic.gdx.scenes.scene2d.ui.Table
+import com.badlogic.gdx.scenes.scene2d.ui.TextButton
+import com.badlogic.gdx.utils.Align
+import com.unciv.Constants
+import com.unciv.GUI
+import com.unciv.UncivGame
+import com.unciv.logic.GameInfo
+import com.unciv.logic.GameStarter
+import com.unciv.logic.HolidayDates
+import com.unciv.logic.UncivShowableException
+import com.unciv.logic.UpdateCheckResult
+import com.unciv.logic.UpdateChecker
+import com.unciv.logic.github.DownloadAndExtractState
+import com.unciv.logic.github.GithubAPI
+import com.unciv.logic.github.GithubAPI.downloadTo
+import com.unciv.logic.map.MapParameters
+import com.unciv.logic.map.MapShape
+import com.unciv.logic.map.MapSize
+import com.unciv.logic.map.MapType
+import com.unciv.logic.map.mapgenerator.MapGenerator
+import com.unciv.models.metadata.BaseRuleset
+import com.unciv.models.metadata.GameSetupInfo
+import com.unciv.models.metadata.GameSettings.PlayerRegion
+import com.unciv.models.ruleset.Ruleset
+import com.unciv.models.ruleset.RulesetCache
+import com.unciv.models.tilesets.TileSetCache
+import com.unciv.models.translations.tr
+import com.unciv.ui.audio.SoundPlayer
+import com.unciv.ui.components.UncivTooltip.Companion.addTooltip
+import com.unciv.ui.components.extensions.center
+import com.unciv.ui.components.extensions.disable
+import com.unciv.ui.components.extensions.getCloseButton
+import com.unciv.ui.components.extensions.surroundWithCircle
+import com.unciv.ui.components.extensions.surroundWithThinCircle
+import com.unciv.ui.components.extensions.toLabel
+import com.unciv.ui.components.extensions.toTextButton
+import com.unciv.ui.components.fonts.Fonts
+import com.unciv.ui.components.input.KeyShortcutDispatcherVeto
+import com.unciv.ui.components.input.KeyboardBinding
+import com.unciv.ui.components.input.keyShortcuts
+import com.unciv.ui.components.input.onActivation
+import com.unciv.ui.components.input.onClick
+import com.unciv.ui.components.input.onLongPress
+import com.unciv.ui.components.tilegroups.TileGroupMap
+import com.unciv.ui.components.widgets.AutoScrollPane
+import com.unciv.ui.images.ImageGetter
+import com.unciv.ui.images.padTopDescent
+import com.unciv.ui.popups.CommunityTermsPopup
+import com.unciv.ui.popups.ConfirmPopup
+import com.unciv.ui.popups.Popup
+import com.unciv.ui.popups.ToastPopup
+import com.unciv.ui.popups.closeAllPopups
+import com.unciv.ui.popups.hasOpenPopups
+import com.unciv.ui.popups.options.AboutTab
+import com.unciv.ui.popups.popups
+import com.unciv.ui.screens.basescreen.BaseScreen
+import com.unciv.ui.screens.basescreen.RecreateOnResize
+import com.unciv.ui.screens.mainmenuscreen.EasterEggRulesets.modifyForEasterEgg
+import com.unciv.ui.screens.mapeditorscreen.EditorMapHolder
+import com.unciv.ui.screens.mapeditorscreen.MapEditorScreen
+import com.unciv.ui.screens.modmanager.ModManagementScreen
+import com.unciv.ui.screens.multiplayerscreens.MultiplayerScreen
+import com.unciv.ui.screens.newgamescreen.NewGameScreen
+import com.unciv.ui.screens.savescreens.LoadGameScreen
+import com.unciv.ui.screens.savescreens.QuickSave
+import com.unciv.ui.screens.worldscreen.BackgroundActor
+import com.unciv.ui.screens.worldscreen.WorldScreen
+import com.unciv.ui.screens.worldscreen.mainmenu.WorldScreenMenuPopup
+import com.unciv.utils.Concurrency
+import com.unciv.utils.launchOnGLThread
+import kotlinx.coroutines.Job
+import yairm210.purity.annotations.Pure
+import kotlin.math.ceil
+
+
+class MainMenuScreen: BaseScreen(), RecreateOnResize {
+    private val backgroundStack = Stack()
+    private val singleColumn = isCrampedPortrait()
+
+    private val backgroundMapRuleset: Ruleset
+    private var easterEggRuleset: Ruleset? = null  // Cache it so the next 'egg' can be found in Civilopedia
+
+    private var backgroundMapGenerationJob: Job? = null
+    private var backgroundMapExists = false
+
+    private var updateCheckJob: Job? = null
+    private var updateAvailable: GithubAPI.LatestRelease? = null
+    /** The single "New version available" label, so repeated update checks can't stack copies in [versionTable] */
+    private var updateAvailableLabel: Label? = null
+    private var installerDownloadJob: Job? = null
+    /** GL 回调守卫：屏幕销毁/重建后不再操作旧 stage 上的 UI，防止后台下载回调写入已释放资源 */
+    private var isDisposed = false
+    private lateinit var versionTable: Table
+    private lateinit var installerProgressBar: InstallerDownloadProgress
+
+    companion object {
+        const val mapFadeTime = 1.3f
+        const val mapFirstFadeTime = 0.3f
+        const val mapReplaceDelay = 20f
+        /** Inner size of the Civilopedia+Discord+Github buttons (effective size adds 2f for the thin circle) */
+        const val buttonsSize = 60f
+        /** Distance of the Civilopedia and Discord+Github buttons from the stage edges */
+        const val buttonsPosFromEdge = 30f
+    }
+
+    /** Create one **Main Menu Button** including onClick/key binding
+     *  @param text      The text to display on the button
+     *  @param icon      The path of the icon to display on the button
+     *  @param binding   keyboard binding
+     *  @param function  Action to invoke when the button is activated
+     */
+    private fun getMenuButton(
+        text: String,
+        icon: String,
+        binding: KeyboardBinding,
+        function: () -> Unit
+    ): Table {
+        val table = Table().pad(15f, 30f, 15f, 30f)
+        table.background = skinStrings.getUiBackground(
+            "MainMenuScreen/MenuButton",
+            skinStrings.roundedEdgeRectangleShape,
+            skinStrings.skinConfig.baseColor
+        )
+        table.add(ImageGetter.getImage(icon)).size(50f).padRight(20f)
+        table.add(text.toLabel(fontSize = 30, alignment = Align.left)).expand().left().minWidth(200f)
+            .padTopDescent()
+
+        table.touchable = Touchable.enabled
+        table.onActivation(binding = binding) {
+            stopBackgroundMapGeneration()
+            function()
+        }
+
+        table.pack()
+        return table
+    }
+
+    init {
+        SoundPlayer.initializeForMainMenu()
+
+        val background = skinStrings.getUiBackground("MainMenuScreen/Background", tintColor = clearColor)
+        backgroundStack.add(BackgroundActor(background, Align.center))
+        stage.addActor(backgroundStack)
+        backgroundStack.setFillParent(true)
+
+        // If we were in a mod, some of the resource images for the background map we're creating
+        // will not exist unless we reset the ruleset and images
+        val baseRuleset = RulesetCache.getVanillaRuleset()
+        ImageGetter.setNewRuleset(baseRuleset)
+
+        if (game.settings.enableEasterEggs) {
+            val holiday = HolidayDates.getHolidayByDate()
+            if (holiday != null)
+                EasterEggFloatingArt(stage, holiday.name)
+            val easterEggMod = EasterEggRulesets.getTodayEasterEggRuleset()
+            if (easterEggMod != null)
+                easterEggRuleset = RulesetCache.getComplexRuleset(baseRuleset, listOf(easterEggMod))
+        }
+        backgroundMapRuleset = easterEggRuleset ?: baseRuleset
+
+        // This is an extreme safeguard - should an invalid settings.tileSet ever make it past the
+        // guard in UncivGame.create, simply omit the background so the user can at least get to options
+        // (let him crash when loading a game but avoid locking him out entirely)
+        if (game.settings.tileSet in TileSetCache)
+            startBackgroundMapGeneration()
+
+        val column1 = Table().apply { defaults().pad(10f).fillX() }
+        val column2 = if (singleColumn) column1 else Table().apply { defaults().pad(10f).fillX() }
+
+        if (game.files.autosaves.autosaveExists()) {
+            val resumeTable = getMenuButton("Resume","OtherIcons/Resume", KeyboardBinding.Resume)
+                { resumeGame() }
+            column1.add(resumeTable).row()
+        }
+
+        val quickstartTable = getMenuButton("Quickstart", "OtherIcons/Quickstart", KeyboardBinding.Quickstart)
+            { quickstartNewGame() }
+        column1.add(quickstartTable).row()
+
+        val newGameButton = getMenuButton("Start new game", "OtherIcons/New", KeyboardBinding.StartNewGame) {
+            game.pushScreen{ NewGameScreen() } 
+        }
+        column1.add(newGameButton).row()
+
+        val loadGameTable = getMenuButton("Load game", "OtherIcons/Load", KeyboardBinding.MainMenuLoad) {
+            game.pushScreen{ LoadGameScreen() }
+        }
+        column1.add(loadGameTable).row()
+
+        val multiplayerTable = getMenuButton("Multiplayer", "OtherIcons/Multiplayer", KeyboardBinding.Multiplayer) {
+            game.pushScreen{ MultiplayerScreen() }
+        }
+        column2.add(multiplayerTable).row()
+
+        val mapEditorScreenTable = getMenuButton("Map editor", "OtherIcons/MapEditor", KeyboardBinding.MapEditor) {
+            game.pushScreen{ MapEditorScreen() }
+        }
+        column2.add(mapEditorScreenTable).row()
+
+        val modsTable = getMenuButton("Mods", "OtherIcons/Mods", KeyboardBinding.ModManager) {
+            game.pushScreen{ ModManagementScreen() }
+        }
+        column2.add(modsTable).row()
+
+        val optionsTable = getMenuButton("Options", "OtherIcons/Options", KeyboardBinding.MainMenuOptions)
+            { openOptionsPopup() }
+        optionsTable.onLongPress { openOptionsPopup(withDebug = true) }
+        column2.add(optionsTable).row()
+
+
+        val table = Table().apply { defaults().pad(10f) }
+        table.add(column1)
+        if (!singleColumn) table.add(column2)
+        table.pack()
+
+        val scrollPane = AutoScrollPane(table)
+        scrollPane.setFillParent(true)
+        stage.addActor(scrollPane)
+        table.center(scrollPane)
+
+        globalShortcuts.add(KeyboardBinding.QuitMainMenu) {
+            if (hasOpenPopups()) {
+                closeAllPopups()
+                return@add
+            }
+            game.popScreen()
+        }
+
+        val civilopediaButton = "?".toLabel(fontSize = 48)
+            .apply { setAlignment(Align.center) }
+            .surroundWithCircle(buttonsSize, color = skinStrings.skinConfig.baseColor)
+            .apply { actor.y -= Fonts.getDescenderHeight(48) / 2 } // compensate font baseline
+            .surroundWithThinCircle(Color.WHITE)
+        civilopediaButton.touchable = Touchable.enabled
+        // Passing the binding directly to onActivation gives you a size 26 tooltip...
+        civilopediaButton.onActivation { openCivilopedia() }
+        civilopediaButton.keyShortcuts.add(KeyboardBinding.Civilopedia)
+        civilopediaButton.addTooltip(KeyboardBinding.Civilopedia, 30f)
+        civilopediaButton.setPosition(buttonsPosFromEdge, buttonsPosFromEdge)
+        stage.addActor(civilopediaButton)
+
+        val rightSideButtons = Table().apply { defaults().space(10f) }
+        val qqGroupButton = ImageGetter.getExternalImage("QQ.png")
+            .surroundWithCircle(buttonsSize, color = skinStrings.skinConfig.baseColor)
+            .surroundWithThinCircle(Color.WHITE)
+            .onActivation { Gdx.net.openURI("https://qm.qq.com/q/j92c3iUnZ0") }
+        rightSideButtons.add(qqGroupButton)
+
+        val githubButton = ImageGetter.getImage("OtherIcons/Github")
+            .surroundWithCircle(buttonsSize, color = skinStrings.skinConfig.baseColor)
+            .surroundWithThinCircle(Color.WHITE)
+            .onActivation { Gdx.net.openURI(Constants.uncivRepoURL) }
+        rightSideButtons.add(githubButton)
+
+        val tiebaButton = ImageGetter.getExternalImage("Tieba.png")
+            .surroundWithCircle(buttonsSize, color = skinStrings.skinConfig.baseColor)
+            .surroundWithThinCircle(Color.WHITE)
+            .onActivation { Gdx.net.openURI("https://tieba.baidu.com/f?kw=unciv&fr=personalize_page") }
+        rightSideButtons.add(tiebaButton)
+
+        rightSideButtons.pack()
+        rightSideButtons.setPosition(stage.width - buttonsPosFromEdge, buttonsPosFromEdge, Align.bottomRight)
+        stage.addActor(rightSideButtons)
+
+        val versionLabel = "{Version} ${UncivGame.VERSION.text}".toLabel()
+        versionLabel.setAlignment(Align.center)
+        versionTable = Table()
+        versionTable.background = skinStrings.getUiBackground("MainMenuScreen/Version",
+            skinStrings.roundedEdgeRectangleShape, Color.DARK_GRAY.cpy().apply { a = 0.7f })
+        versionTable.add(versionLabel).row()
+        versionTable.pack()
+        versionTable.setPosition(stage.width / 2, 10f, Align.bottom)
+        versionTable.touchable = Touchable.enabled
+        versionTable.onClick {
+            val popup = Popup(stage)
+            if (updateAvailable == null) {
+                popup.add(AboutTab.asTable()).row()
+                popup.addCloseButton()
+            } else {
+                addUpdateAvailableContent(popup)
+                popup.addCloseButton()
+            }
+            popup.open()
+        }
+        stage.addActor(versionTable)
+
+        // 常驻安装包下载进度条：独立于更新弹窗，弹窗关闭后仍可见
+        installerProgressBar = InstallerDownloadProgress()
+        installerProgressBar.setPosition(stage.width / 2, versionTable.height + 12f, Align.bottom)
+        stage.addActor(installerProgressBar)
+        askCommunityTermsIfNeeded()
+        askPlayerRegionIfNeeded()
+    }
+
+    /** 首次启动显示社区服务条款与年龄确认弹窗（见 [CommunityTermsPopup]）；已接受则跳过。 */
+    private fun askCommunityTermsIfNeeded() {
+        if (game.settings.hasAcceptedCommunityTerms) return
+        CommunityTermsPopup(stage).open()
+    }
+
+    /** 首次启动询问玩家所在地区（决定更新下载走的服务器）；已设置则直接检查更新。
+     *  弹窗会说明两个选项的含义，玩家选完后保存设置并开始检查更新。 */
+    private fun askPlayerRegionIfNeeded() {
+        if (game.settings.playerRegion.isNotEmpty()) {
+            startUpdateCheck()
+            return
+        }
+        val popup = Popup(stage)
+        popup.add("Select your region".toLabel(fontSize = Constants.headingFontSize, alignment = Align.center)).row()
+        popup.add(
+            "This decides which server your in-game updates download from:\n" +
+                "- Mainland China: downloads come from the official CN server - recommended if github.com is often unreachable in your network.\n" +
+                "- Outside mainland China: downloads follow the source you set in Options - Advanced (GitHub by default)."
+                .toLabel(alignment = Align.center)
+        ).pad(10f).row()
+        val mainlandButton = PlayerRegion.MainlandChina.displayName.toTextButton()
+        mainlandButton.onClick {
+            game.settings.playerRegion = PlayerRegion.MainlandChina.name
+            game.settings.save()
+            popup.close()
+            startUpdateCheck()
+        }
+        val overseasButton = PlayerRegion.Overseas.displayName.toTextButton()
+        overseasButton.onClick {
+            game.settings.playerRegion = PlayerRegion.Overseas.name
+            game.settings.save()
+            popup.close()
+            startUpdateCheck()
+        }
+        val buttonRow = Table()
+        buttonRow.add(mainlandButton).pad(5f)
+        buttonRow.add(overseasButton).pad(5f)
+        popup.add(buttonRow).row()
+        popup.open()
+    }
+
+    private fun startBackgroundMapGeneration() {
+        stopBackgroundMapGeneration()  // shouldn't be necessary as resize re-instantiates this class
+        backgroundMapGenerationJob = Concurrency.run("ShowMapBackground") {
+            // MapSize.Small has easily enough tiles to fill the entire background - unless the user sized their window to some extreme aspect ratio
+            val mapWidth = stage.width / TileGroupMap.groupHorizontalAdvance
+            val mapHeight = stage.height / TileGroupMap.groupSize
+            @Pure fun Float.scaleCoord(scale: Float) = ceil(this * scale).toInt().coerceAtLeast(6)
+            // These scale values are chosen so that a common 4:3 screen minus taskbar gives the same as MapSize.Small
+            val backgroundMapSize = MapSize(mapWidth.scaleCoord(.77f), mapHeight.scaleCoord(1f))
+
+            val newMap = MapGenerator(backgroundMapRuleset, this)
+                .generateMap(MapParameters().apply {
+                    shape = MapShape.rectangular
+                    mapSize = backgroundMapSize
+                    type = MapType.pangaea
+                    temperatureintensity = .7f
+                    waterThreshold = -0.1f // mainly land, gets about 30% water
+                    modifyForEasterEgg()
+                })
+
+            launchOnGLThread { // for GL context
+                ImageGetter.setNewRuleset(backgroundMapRuleset, ignoreIfModsAreEqual = true)
+                val mapHolder = EditorMapHolder(
+                    this@MainMenuScreen,
+                    newMap
+                ) {}
+                mapHolder.color = mapHolder.color.cpy()
+                mapHolder.color.a = 0f
+                backgroundStack.add(mapHolder)
+
+                if (backgroundMapExists) {
+                    mapHolder.addAction(Actions.sequence(
+                        Actions.fadeIn(mapFadeTime),
+                        Actions.run { backgroundStack.removeActorAt(1, false) }
+                    ))
+                } else {
+                    backgroundMapExists = true
+                    mapHolder.addAction(Actions.fadeIn(mapFirstFadeTime))
+                }
+            }
+        }.apply {
+            invokeOnCompletion {
+                backgroundMapGenerationJob = null
+                backgroundStack.addAction(Actions.sequence(
+                    Actions.delay(mapReplaceDelay),
+                    Actions.run { startBackgroundMapGeneration() }
+                ))
+            }
+        }
+    }
+
+    private fun stopBackgroundMapGeneration() {
+        backgroundStack.clearActions()
+        val currentJob = backgroundMapGenerationJob
+            ?: return
+        backgroundMapGenerationJob = null
+        if (currentJob.isCancelled) return
+        currentJob.cancel()
+    }
+
+    //region Update check
+    /** Query the game repository's latest GitHub release in the background - goes through the active download source */
+    private fun startUpdateCheck() {
+        updateCheckJob?.cancel()
+        var job: Job? = null
+        job = Concurrency.run("UpdateCheck") {
+            val result = UpdateChecker.checkForUpdates()
+            launchOnGLThread {
+                if (job?.isCancelled == true) return@launchOnGLThread
+                onUpdateCheckResult(result)
+            }
+        }
+        updateCheckJob = job
+    }
+
+    private fun onUpdateCheckResult(result: UpdateCheckResult) {
+        when (result) {
+            is UpdateCheckResult.UpdateAvailable -> {
+                updateAvailable = result.latestRelease
+                // A previous check may already have added the label - reuse it instead of stacking another
+                if (updateAvailableLabel == null) {
+                    // Keep the label short so it doesn't push the version number around
+                    val updateLabel = "New version available".toLabel(
+                        fontColor = Color.GOLD, fontSize = 12, alignment = Align.center
+                    )
+                    updateAvailableLabel = updateLabel
+                    versionTable.add(updateLabel).row()
+                    versionTable.pack()
+                    versionTable.setPosition(stage.width / 2, 10f, Align.bottom)
+                }
+            }
+
+            is UpdateCheckResult.UpToDate -> Unit
+
+            is UpdateCheckResult.CheckFailed -> suggestSwitchingDownloadSource()
+        }
+    }
+
+    /** When the update check fails. Mainland China players query the CN download server
+     *  (network problem, unrelated to the mod download source); everyone else queries the
+     *  download source, so the usual fix is switching that source.
+     *  Must be called on the GL thread. */
+    private fun suggestSwitchingDownloadSource() {
+        val message = if (PlayerRegion.fromStoredName(game.settings.playerRegion) == PlayerRegion.MainlandChina)
+            "Could not check for updates - the download server is unreachable. Check your network and try again later."
+        else
+            "Could not check for updates. If this keeps happening, switch the download source in Options - Advanced."
+        ToastPopup(message.tr(), this)
+    }
+
+    /** Fill [popup] with "new version available" content: current vs latest version and a download link */
+    private fun addUpdateAvailableContent(popup: Popup) {
+        val release = updateAvailable ?: return
+        val content = Table()
+        content.add("New version available".toLabel(fontSize = Constants.headingFontSize, alignment = Align.center)).row()
+        content.add(
+            "Version [${release.tag_name}] is now available. You are running version [${UncivGame.VERSION.text}]."
+                .toLabel(alignment = Align.center)
+        ).pad(10f).row()
+        // Offer the platform's installer packages - on desktop (esp. Windows) several are listed so the player can choose
+        val downloadAssets = release.listDownloadAssets(currentPlatform).filter { it.browser_download_url.isNotEmpty() }
+        // On Android the package is downloaded in-game and handed to the system installer - elsewhere the browser does it
+        val installerFolder = game.getInstallerDownloadFolder()?.let { Gdx.files.absolute(it) }
+        // Rescue hygiene: remove leftover packages of older releases / interrupted downloads (not currently downloading)
+        installerFolder?.let { folder ->
+            if (installerDownloadJob?.isActive != true) {
+                val keepNames = downloadAssets.flatMap { listOf(it.name, "${it.name}.part") }
+                folder.list().forEach { file -> if (file.name() !in keepNames) file.delete() }
+            }
+        }
+        if (downloadAssets.isEmpty()) {
+            val releasePageButton = "Open release page".toTextButton()
+            releasePageButton.onClick {
+                popup.close()
+                openInstallerUrl(release.html_url)
+            }
+            content.add(releasePageButton).pad(10f).row()
+        } else if (downloadAssets.size == 1) {
+            val asset = downloadAssets.first()
+            content.add(
+                "Installer file: [${asset.name}]".toLabel(fontSize = 14, alignment = Align.center)
+            ).pad(5f).row()
+            content.add(createInstallerButton(asset, installerFolder, popup)).pad(10f).row()
+        } else {
+            for (asset in downloadAssets) {
+                content.add(createInstallerButton(asset, installerFolder, popup)).pad(5f).row()
+            }
+        }
+        if (installerFolder == null && downloadAssets.isNotEmpty()) {
+            content.add(
+                "The installer will be saved to your browser's download folder."
+                    .toLabel(fontSize = 14, alignment = Align.center)
+            ).pad(5f).row()
+        }
+        popup.add(content).row()
+    }
+
+    /** Open an installer URL in the system browser - failure (e.g. no default browser) must not crash the game */
+    private fun openInstallerUrl(url: String) {
+        try {
+            Gdx.net.openURI(GithubAPI.proxify(url))
+        } catch (_: Exception) {
+            ToastPopup("Could not open the download link.".tr(), this@MainMenuScreen)
+        }
+    }
+
+    /**
+     * One installer package row: on Android it downloads in-game (showing progress on the button)
+     * and then offers [Install] through the system installer, with a Redownload fallback and a note
+     * when a copy was also saved to the public Downloads folder; everywhere else the browser handles it.
+     */
+    private fun createInstallerButton(
+        asset: GithubAPI.ReleaseAsset,
+        installerFolder: FileHandle?,
+        popup: Popup,
+    ): Table {
+        val row = Table()
+        if (installerFolder == null) {
+            val downloadButton = asset.name.toTextButton()
+            downloadButton.onClick {
+                popup.close()
+                openInstallerUrl(asset.browser_download_url)
+            }
+            row.add(downloadButton)
+            return row
+        }
+
+        // Android: in-game download with rescue paths - a completed package shows Install (+Redownload),
+        // an interrupted one leaves only a .part file so it can simply be downloaded again
+        val apkFile = installerFolder.child(asset.name)
+        val partFile = installerFolder.child("${asset.name}.part")
+        var downloaded = apkFile.exists() && apkFile.length() > 0
+        val downloading = installerDownloadJob?.isActive == true
+        val savedNote = "The APK is also saved to your system download folder."
+            .toLabel(fontSize = 14, alignment = Align.center)
+            .apply { isVisible = downloaded }
+
+        val mainButton = when {
+            downloaded -> "Install".toTextButton()
+            downloading -> "Downloading...".toTextButton().apply { disable() }
+            else -> asset.name.toTextButton()
+        }
+        val redownloadButton = "Redownload".toTextButton().apply { isVisible = downloaded }
+        fun startDownload() {
+            if (installerDownloadJob?.isActive == true) return
+            installerProgressBar.startDownload(asset, installerFolder)
+            startInstallerDownload(asset, mainButton, installerFolder) { success, savedToPublic ->
+                downloaded = success
+                redownloadButton.isVisible = success
+                savedNote.isVisible = success && savedToPublic
+            }
+        }
+        mainButton.onClick {
+            if (downloaded) {
+                popup.close()
+                game.installDownloadedApk(apkFile.file().absolutePath)
+            } else startDownload()
+        }
+        redownloadButton.onClick { startDownload() }
+        row.add(mainButton)
+        row.add(redownloadButton).padLeft(10f)
+        row.row()
+        row.add(savedNote).colspan(2).padTop(5f)
+        return row
+    }
+
+    /**
+     * Download an installer package in the background, showing progress on [button] and on the
+     * persistent [installerProgressBar].
+     * Downloads to a `.part` file first and renames it on success, so an interrupted download
+     * can never be mistaken for a complete package; on success a copy is also offered to the
+     * public Downloads folder ([onFinished] receives both results, runs on the GL thread).
+     * All UI updates are guarded by [isDisposed] so late callbacks after the screen was
+     * destroyed/recreated cannot touch a disposed stage.
+     */
+    private fun startInstallerDownload(
+        asset: GithubAPI.ReleaseAsset,
+        button: TextButton,
+        installerFolder: FileHandle,
+        onFinished: (Boolean, Boolean) -> Unit,
+    ) {
+        installerDownloadJob?.cancel()
+        installerDownloadJob = Concurrency.run("DownloadInstaller") {
+            val partFile = installerFolder.child("${asset.name}.part")
+            val apkFile = installerFolder.child(asset.name)
+            val success = asset.downloadTo(partFile) { state, progress ->
+                launchOnGLThread {
+                    if (isDisposed) return@launchOnGLThread
+                    installerProgressBar.updateProgress(state, progress)
+                    button.setText(state.message(progress).tr())
+                }
+            }
+            val moved = try {
+                if (success) {
+                    partFile.moveTo(apkFile)
+                    true
+                } else false
+            } catch (_: Exception) {
+                false
+            }
+            val savedToPublic = moved && game.saveInstallerToPublicFolder(apkFile.file().absolutePath)
+            launchOnGLThread {
+                if (isDisposed) return@launchOnGLThread
+                installerProgressBar.onDownloadFinished(moved)
+                onFinished(moved, savedToPublic)
+                if (moved) {
+                    button.setText("Install".tr())
+                } else {
+                    partFile.delete()
+                    button.setText(asset.name)
+                    ToastPopup("Download failed".tr(), this@MainMenuScreen)
+                }
+            }
+        }
+    }
+
+    /**
+     * Persistent installer download progress bar: lives on the main menu stage independently of
+     * the update popup, so it stays visible when the popup is closed; the player can dismiss it
+     * manually (which only hides it - the download continues). When the download finishes it
+     * turns into the install entry until dismissed again.
+     * All updates must run on the GL thread while the screen is alive (see the [isDisposed] guards).
+     */
+    private inner class InstallerDownloadProgress : Table() {
+        private val statusLabel = "".toLabel(fontSize = 14, alignment = Align.center)
+        private val progressBar = ImageGetter.ProgressBar(260f, 12f, vertical = false)
+            .setBackground(ImageGetter.CHARCOAL)
+            .setProgress(Color.GOLD, 0f)
+        private val installButton = "Install".toTextButton()
+        private val dismissButton = getCloseButton(size = 26f, iconSize = 18f, action = ::dismiss)
+
+        private var apkFile: FileHandle? = null
+
+        init {
+            isVisible = false
+            background = skinStrings.getUiBackground("MainMenuScreen/Version",
+                skinStrings.roundedEdgeRectangleShape, Color.DARK_GRAY.cpy().apply { a = 0.7f })
+            installButton.isVisible = false
+            installButton.onClick {
+                val apk = apkFile ?: return@onClick
+                game.installDownloadedApk(apk.file().absolutePath)
+            }
+
+            add(statusLabel).expandX().center().pad(6f, 12f, 2f, 12f)
+            add(installButton).pad(6f, 0f, 2f, 4f)
+            add(dismissButton).pad(4f).size(26f)
+            row()
+            add(progressBar).colspan(3).width(260f).height(12f).pad(0f, 12f, 8f, 12f)
+            pack()
+        }
+
+        /** Start a download: show the bar (it stays visible even after the update popup closes) */
+        fun startDownload(asset: GithubAPI.ReleaseAsset, installerFolder: FileHandle) {
+            apkFile = installerFolder.child(asset.name)
+            installButton.isVisible = false
+            setStatus("Downloading...".tr(), 0)
+            show()
+        }
+
+        /** Download progress callback (GL thread); stays quiet while dismissed */
+        fun updateProgress(state: DownloadAndExtractState, progress: Int?) {
+            if (!isVisible) return
+            setStatus(state.message(progress).tr(), progress ?: 0)
+        }
+
+        /** Download finished (GL thread): on success turn into the install entry, on failure show the failure state */
+        fun onDownloadFinished(success: Boolean) {
+            installButton.isVisible = success
+            setStatus(
+                if (success) "Installer ready".tr() else "Download failed".tr(),
+                if (success) 100 else 0
+            )
+            show()
+        }
+
+        private fun setStatus(text: String, percent: Int) {
+            statusLabel.setText(text)
+            progressBar.primaryProgress?.setSize(progressBar.width * percent / 100f, progressBar.height)
+        }
+
+        /** Manual dismiss: only hides the bar, the download continues */
+        fun dismiss() {
+            isVisible = false
+        }
+
+        private fun show() {
+            isVisible = true
+            toFront()
+        }
+    }
+
+    /** Short platform id used to pick the right installer asset from a GitHub release */
+    private val currentPlatform: String
+        get() = when (Gdx.app.type) {
+            Application.ApplicationType.Android -> "android"
+            Application.ApplicationType.Desktop -> {
+                val os = System.getProperty("os.name").lowercase()
+                when {
+                    os.contains("win") -> "windows"
+                    os.contains("mac") || os.contains("darwin") -> "mac"
+                    else -> "linux"
+                }
+            }
+            else -> "other"
+        }
+    //endregion
+
+    private fun resumeGame() {
+        if (GUI.isWorldLoaded()) {
+            val currentTileSet = GUI.getMap().currentTileSetStrings
+            val currentGameSetting = GUI.getSettings()
+            if (currentTileSet.tileSetName != currentGameSetting.tileSet ||
+                    currentTileSet.unitSetName != currentGameSetting.unitSet) {
+                game.removeScreensOfType(WorldScreen::class)
+                QuickSave.autoLoadGame(this)
+            } else {
+                GUI.resetToWorldScreen()
+                GUI.getWorldScreen().popups.filterIsInstance<WorldScreenMenuPopup>().forEach(Popup::close)
+            }
+        } else {
+            QuickSave.autoLoadGame(this)
+        }
+    }
+
+    private fun quickstartNewGame() {
+        ToastPopup(Constants.working, this)
+        val errorText = "Cannot start game with the default new game parameters!"
+        Concurrency.run("QuickStart") {
+            val newGame: GameInfo
+            // Can fail when starting the game...
+            try {
+                val gameInfo = GameSetupInfo.fromSettings("Chieftain")
+                if (gameInfo.gameParameters.victoryTypes.isEmpty()) {
+                    val ruleSet = RulesetCache.getComplexRuleset(gameInfo.gameParameters)
+                    gameInfo.gameParameters.victoryTypes.addAll(ruleSet.selectableVictories().map { it.name })
+                }
+                newGame = GameStarter.startNewGame(gameInfo)
+
+            } catch (notAPlayer: UncivShowableException) {
+                val (message) = LoadGameScreen.getLoadExceptionMessage(notAPlayer)
+                launchOnGLThread { ToastPopup(message, this@MainMenuScreen) }
+                return@run
+            } catch (_: Exception) {
+                launchOnGLThread { ToastPopup(errorText, this@MainMenuScreen) }
+                return@run
+            }
+
+            // ...or when loading the game
+            try {
+                game.loadGame(newGame)
+            } catch (_: OutOfMemoryError) {
+                launchOnGLThread {
+                    ToastPopup("Not enough memory on phone to load game!", this@MainMenuScreen)
+                }
+            } catch (notAPlayer: UncivShowableException) {
+                val (message) = LoadGameScreen.getLoadExceptionMessage(notAPlayer)
+                launchOnGLThread {
+                    ToastPopup(message, this@MainMenuScreen)
+                }
+            } catch (_: Exception) {
+                launchOnGLThread {
+                    ToastPopup(errorText, this@MainMenuScreen)
+                }
+            }
+        }
+    }
+
+    override fun getCivilopediaRuleset(): Ruleset {
+        if (easterEggRuleset != null) return easterEggRuleset!!
+        val rulesetParameters = game.settings.lastGameSetup?.gameParameters
+        if (rulesetParameters != null) return RulesetCache.getComplexRuleset(rulesetParameters)
+        return RulesetCache[BaseRuleset.Civ_V_GnK.fullName]
+            ?: throw IllegalStateException("No ruleset found")
+    }
+
+    override fun openCivilopedia(link: String) {
+        stopBackgroundMapGeneration()
+        val ruleset = getCivilopediaRuleset()
+        UncivGame.Current.translations.translationActiveMods = ruleset.mods
+        ImageGetter.setNewRuleset(ruleset)
+        setSkin()
+        openCivilopedia(ruleset, link = link)
+    }
+
+    override fun recreate(): BaseScreen {
+        stopBackgroundMapGeneration()
+        updateCheckJob?.cancel()
+        installerDownloadJob?.cancel()
+        return MainMenuScreen()
+    }
+
+    override fun dispose() {
+        isDisposed = true
+        updateCheckJob?.cancel()
+        installerDownloadJob?.cancel()
+        super.dispose()
+    }
+
+    override fun resume() {
+        startBackgroundMapGeneration()
+    }
+
+    // We contain a map...
+    override fun getShortcutDispatcherVetoer() = KeyShortcutDispatcherVeto.createTileGroupMapDispatcherVetoer()
+}
