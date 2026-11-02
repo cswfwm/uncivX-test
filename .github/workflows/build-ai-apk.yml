@@ -40,15 +40,15 @@ jobs:
       - name: Publish APK
         id: publish
         run: |
+          mkdir -p release
           VERSION=$(grep -oP 'appVersion = "\K[^"]+' buildSrc/src/main/kotlin/BuildConfig.kt)
           TAG="V${VERSION}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "apk=release/uncivCN-X-${TAG}-${STAMP}.apk" >> "$GITHUB_OUTPUT"
-          mkdir -p release
           STAMP=$(date -u +%Y%m%d-%H%M)
           OUT="release/uncivCN-X-${TAG}-${STAMP}.apk"
           cp android/build/outputs/apk/release/*.apk "$OUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "apk=$OUT" >> "$GITHUB_OUTPUT"
           ls -1t release/*.apk | tail -n +6 | xargs -r rm -f
           ls -lt release
 
