@@ -11,23 +11,28 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
       - name: Configure SDK
         run: echo "sdk.dir=${ANDROID_SDK_ROOT}" > local.properties
-      - name: Restore keystore
-        env:
-          KEYSTORE_B64: ${{ secrets.CI_KEYSTORE_BASE64 }}
+
+      # Signing material lives in the repo so consecutive builds share one certificate and can
+      # upgrade each other; a per-build key would force an uninstall before every update.
+      - name: Prepare signing
         run: |
-          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          base64 -d signing/keystore.b64 > "$RUNNER_TEMP/release.jks"
           echo "CI_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
-          echo "CI_KEYSTORE_PASSWORD=${{ secrets.CI_KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
-          echo "CI_KEY_ALIAS=${{ secrets.CI_KEY_ALIAS }}" >> "$GITHUB_ENV"
-          echo "CI_KEY_PASSWORD=${{ secrets.CI_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+          echo "CI_KEYSTORE_PASSWORD=uncivx2026" >> "$GITHUB_ENV"
+          echo "CI_KEY_ALIAS=uncivx" >> "$GITHUB_ENV"
+          echo "CI_KEY_PASSWORD=uncivx2026" >> "$GITHUB_ENV"
+
       - name: Build
         run: ./gradlew :android:assembleRelease --no-daemon
+
       - uses: actions/upload-artifact@v4
         with:
           name: uncivx-release
