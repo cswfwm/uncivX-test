@@ -24,6 +24,13 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 object LlmTurnPlanner {
 
+    /** Tolerates the small deviations relays and models introduce. */
+    private val lenientJson = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+        allowSpecialFloatingPointValues = true
+    }
+
     private const val SYSTEM_PROMPT =
         "You are the player of a Civilization V style 4X game (Unciv). " +
         "Answer with a single JSON object and no prose, no markdown fences. " +
@@ -71,8 +78,9 @@ object LlmTurnPlanner {
 
         val plan = parsePlan(answer.getOrNull()!!)
         if (plan == null) {
-            onLog("LLM answer was not valid JSON - using stock automation")
-            return fallback(civ, "invalid JSON")
+            val raw = answer.getOrNull()?.take(800) ?: ""
+            onLog("模型返回的不是有效 JSON")
+            return fallback(civ, "模型返回的不是有效 JSON。原始内容：\n$raw")
         }
 
         val applied = mutableListOf<String>()
@@ -176,15 +184,37 @@ object LlmTurnPlanner {
     private fun reasoningOf(plan: JsonObject): String? =
         plan["reasoning"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
 
-    private fun parsePlan(raw: String): JsonObject? = try {
-        val cleaned = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-        val start = cleaned.indexOf('{')
-        val end = cleaned.lastIndexOf('}')
-        if (start < 0 || end <= start) null
-        else Json.parseToJsonElement(cleaned.substring(start, end + 1)).jsonObject
-    } catch (ex: Exception) {
-        Log.error("Could not parse LLM plan: ${ex.message}")
-        null
+    /**
+     * Extracts the plan object from a model answer.
+     *
+     * Models routinely wrap JSON in prose or fences, add trailing commas, or use single quotes.
+     * Rather than rejecting those, locate the outermost braces and repair the usual mistakes.
+     */
+    private fun parsePlan(raw: String): JsonObject? {
+        val candidates = buildList {
+            add(raw)
+            val start = raw.indexOf('{')
+            val end = raw.lastIndexOf('}')
+            if (start in 0 until end) add(raw.substring(start, end + 1))
+        }
+        for (candidate in candidates) {
+            val repaired = candidate
+                .replace(Regex("```(json)?"), "")
+                .replace(Regex(",\\s*([}\\]])"), "$1")
+                .trim()
+            // Some relays prepend reasoning tags or an "assistant:" label.
+            val withoutTags = Regex("(?s)^[^{]*").replace(repaired, "")
+            for (text in listOf(repaired, withoutTags)) {
+                try {
+                    val element = lenientJson.parseToJsonElement(text)
+                    if (element is JsonObject) return element
+                } catch (_: Exception) {
+                    // try the next form
+                }
+            }
+        }
+        Log.error("Could not parse LLM plan; raw answer: ${raw.take(400)}")
+        return null
     }
 
     private fun applyResearch(civ: Civilization, plan: JsonObject, applied: MutableList<String>) {
