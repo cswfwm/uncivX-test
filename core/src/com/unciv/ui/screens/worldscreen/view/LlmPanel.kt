@@ -2,7 +2,10 @@ package com.unciv.ui.screens.worldscreen.view
 
 import com.badlogic.gdx.graphics.Color
 import com.badlogic.gdx.math.Vector2
+import com.badlogic.gdx.scenes.scene2d.Group
 import com.badlogic.gdx.scenes.scene2d.InputEvent
+import com.badlogic.gdx.scenes.scene2d.Touchable
+import com.badlogic.gdx.scenes.scene2d.ui.Image
 import com.badlogic.gdx.scenes.scene2d.ui.Label
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane
 import com.badlogic.gdx.scenes.scene2d.ui.Table
@@ -99,6 +102,10 @@ class LlmPanel(private val worldScreen: WorldScreen) : Table() {
             onClick { LlmChatPopup(worldScreen, settings).open() }
         }.also { add(it).growX().row() }
 
+        "音乐播放器".toTextButton().apply {
+            onClick { MusicPlayerPopup(worldScreen).open() }
+        }.also { add(it).growX().row() }
+
         "AI 操作本回合".toTextButton().apply {
             if (busy) disable()
             onClick { runAiTurn() }
@@ -150,23 +157,32 @@ class LlmPanel(private val worldScreen: WorldScreen) : Table() {
     }
 
     private fun buildOrb() {
-        val orb = Label("AI", BaseScreen.skin).apply {
+        val orbGroup = Group()
+        orbGroup.setSize(ORB_SIZE, ORB_SIZE)
+
+        val circle = ImageGetter.getCircle(Color(0.12f, 0.12f, 0.12f, 0.92f), ORB_SIZE)
+        circle.setPosition(0f, 0f)
+        orbGroup.addActor(circle)
+
+        val label = Label("AI", BaseScreen.skin).apply {
             color = Color.GOLD
             setAlignment(Align.center)
+            setSize(ORB_SIZE, ORB_SIZE)
         }
-        val button = Table()
-        button.background = BaseScreen.skinStrings.getUiBackground(
-            "WorldScreen/LlmPanel", tintColor = ImageGetter.CHARCOAL)
-        button.add(orb).expand().center()
-        button.onClick {
+        orbGroup.addActor(label)
+
+        // Swallow touches so a tap near the orb cannot reach the map underneath.
+        orbGroup.touchable = Touchable.enabled
+        orbGroup.onClick {
             expanded = true
             rebuild()
         }
-        add(button).size(ORB_SIZE).row()
+
+        add(orbGroup).size(ORB_SIZE).row()
         pack()
         width = ORB_SIZE
         height = ORB_SIZE
-        installDrag(button)
+        installDrag(orbGroup)
     }
 
     private fun buildHeader() {
@@ -201,6 +217,11 @@ class LlmPanel(private val worldScreen: WorldScreen) : Table() {
         actor.addListener(object : DragListener() {
             private var startX = 0f
             private var startY = 0f
+
+            init {
+                // A short motion should still count as a tap, not a drag.
+                tapSquareSize = 40f
+            }
             override fun dragStart(event: InputEvent?, x: Float, y: Float, pointer: Int) {
                 startX = orbPosition.x
                 startY = orbPosition.y
@@ -263,7 +284,10 @@ class LlmPanel(private val worldScreen: WorldScreen) : Table() {
                     ErrorReportPopup(worldScreen, "AI 操作失败", lastError!!).open()
                 } else {
                     lastError = null
-                    logLabel.setText(outcome.applied.take(6).joinToString("\n"))
+                    val reasoning = outcome.reasoning
+                    logLabel.setText(
+                        if (reasoning != null) "思路：$reasoning\n" + outcome.applied.take(4).joinToString("\n")
+                        else outcome.applied.take(6).joinToString("\n"))
                 }
                 rebuild()
                 worldScreen.shouldUpdate = true

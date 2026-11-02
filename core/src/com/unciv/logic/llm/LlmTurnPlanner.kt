@@ -31,12 +31,15 @@ object LlmTurnPlanner {
         "\"cities\": array of {\"name\": city name, \"build\": construction name}; " +
         "\"units\": array of {\"name\": unit name, \"move\": [x,y]} for a destination tile; " +
         "\"reasoning\": one short sentence. " +
-        "Only use names that appear in the provided game state. Omit anything you are unsure about."
+        "Only use names that appear in the provided game state. Omit anything you are unsure about. " +
+        "Write \"reasoning\" in Simplified Chinese."
 
     data class Outcome(
         val applied: List<String>,
         val fallbackUsed: Boolean,
-        val error: String? = null
+        val error: String? = null,
+        /** The model's own one-sentence explanation for this turn, in Chinese. */
+        val reasoning: String? = null
     )
 
     suspend fun planTurn(
@@ -81,8 +84,8 @@ object LlmTurnPlanner {
 
         // Always finish with the stock automation so unfinished parts of the turn are handled.
         NextTurnAutomation.automateCivMoves(civ)
-        applied += "stock automation for remaining items"
-        return Outcome(applied, fallbackUsed = false)
+        applied += "其余单位与城市交给内置自动化"
+        return Outcome(applied, fallbackUsed = false, reasoning = reasoningOf(plan))
     }
 
     private fun buildPrompt(granularity: LlmDecisionGranularity, state: String, warPolicy: String): String {
@@ -94,6 +97,9 @@ object LlmTurnPlanner {
                 "each unit that needs orders."
         return "$task $warPolicy\n\n$state"
     }
+
+    private fun reasoningOf(plan: JsonObject): String? =
+        plan["reasoning"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
 
     private fun parsePlan(raw: String): JsonObject? = try {
         val cleaned = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()

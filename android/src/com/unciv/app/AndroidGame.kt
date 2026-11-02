@@ -97,6 +97,46 @@ class AndroidGame(private val activity: Activity) : UncivGame() {
 
     fun isInitializedProxy() = super.isInitialized
 
+    /** System decoder used for music formats libGDX cannot handle. */
+    private var platformPlayer: android.media.MediaPlayer? = null
+
+    override fun playAudioFile(path: String, volume: Float, onComplete: () -> Unit): Boolean = try {
+        stopAudioFile()
+        val player = android.media.MediaPlayer()
+        player.setDataSource(path)
+        player.setVolume(volume, volume)
+        player.setOnCompletionListener {
+            onComplete()
+        }
+        player.prepare()
+        player.start()
+        platformPlayer = player
+        true
+    } catch (ex: Exception) {
+        stopAudioFile()
+        false
+    }
+
+    override fun stopAudioFile() {
+        platformPlayer?.let {
+            try {
+                it.stop()
+            } catch (_: Exception) {
+            }
+            it.release()
+        }
+        platformPlayer = null
+    }
+
+    override fun setAudioFilePaused(paused: Boolean) {
+        val player = platformPlayer ?: return
+        if (paused) player.pause() else player.start()
+    }
+
+    override fun setAudioFileVolume(volume: Float) {
+        platformPlayer?.setVolume(volume, volume)
+    }
+
     override fun getGcCount(): Int = 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Debug.getRuntimeStat("art.gc.gc-count").toInt() else 0
 

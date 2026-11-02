@@ -104,7 +104,8 @@ class LlmChatPopup(
             val result = LlmClient.complete(
                 settings,
                 "You answer questions about the player's current game of a Civilization V style 4X " +
-                    "game (Unciv). Be concrete and brief. Use only the provided state.",
+                    "game (Unciv). Be concrete and brief. Use only the provided state. " +
+                    "Answer in Simplified Chinese.",
                 "Current state:\n$state\n\n$strengths\n\nQuestion: $question"
             )
             launchOnGLThread {

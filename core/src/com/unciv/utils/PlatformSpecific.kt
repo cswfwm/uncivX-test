@@ -10,6 +10,22 @@ interface PlatformSpecific {
     /** Install system audio hooks */
     fun installAudioHooks() {}
 
+    /**
+     * Play a local audio file with the platform decoder, which understands far more formats
+     * (flac, aac, m4a, opus, wma, ...) than libGDX's mp3/ogg/wav.
+     * @return `true` when the platform took over playback
+     */
+    fun playAudioFile(path: String, volume: Float, onComplete: () -> Unit): Boolean = false
+
+    /** Stop playback started by [playAudioFile], if any. */
+    fun stopAudioFile() {}
+
+    /** Pause/resume playback started by [playAudioFile]. */
+    fun setAudioFilePaused(paused: Boolean) {}
+
+    /** Change volume of [playAudioFile] playback, 0..1. */
+    fun setAudioFileVolume(volume: Float) {}
+
     /** If not null, this is the path to the directory in which to store the local files - mods, saves, maps, etc */
     var customDataDirectory: String?
 
