@@ -41,14 +41,10 @@ object UpdateChecker {
      */
     suspend fun checkForUpdates(): UpdateCheckResult {
         val release = try {
-            if (shouldUseCnServer()) {
-                val url = "${Constants.uncivDownloadServer}/api/downloads/latest.json"
-                val resp = UncivKtor.getOrNull(url) ?: return UpdateCheckResult.CheckFailed
-                json().fromJson(GithubAPI.LatestRelease::class.java, resp.bodyAsText())
-            } else {
-                val (owner, repo) = Constants.updateCheckRepo.split("/")
-                GithubAPI.fetchLatestRelease(owner, repo)
-            }
+            // Updates come from this fork's own repository; the upstream CN download server does
+            // not carry our builds.
+            val (owner, repo) = Constants.updateCheckRepo.split("/")
+            GithubAPI.fetchLatestRelease(owner, repo)
         } catch (_: Exception) {
             return UpdateCheckResult.CheckFailed
         }

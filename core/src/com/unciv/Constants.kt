@@ -160,5 +160,5 @@ object Constants {
      *  UncivCN builds publish their own releases to the CN fork repository,
      *  keeping the release tag in sync with the CN version scheme (e.g. 4.21.6.5).
      *  The upstream default is "yairm210/Unciv". */
-    const val updateCheckRepo = "AutumnPizazz/Unciv"
+    const val updateCheckRepo = "cswfwm/uncivX-test"
 }

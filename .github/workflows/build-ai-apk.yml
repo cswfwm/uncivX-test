@@ -38,10 +38,17 @@ jobs:
 
       # Publish into the repo and keep only the five newest APKs.
       - name: Publish APK
+        id: publish
         run: |
+          VERSION=$(grep -oP 'appVersion = "\K[^"]+' buildSrc/src/main/kotlin/BuildConfig.kt)
+          TAG="V${VERSION}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "apk=release/uncivCN-X-${TAG}-${STAMP}.apk" >> "$GITHUB_OUTPUT"
           mkdir -p release
           STAMP=$(date -u +%Y%m%d-%H%M)
-          cp android/build/outputs/apk/release/*.apk "release/UncivX-4.22.4.4-${STAMP}.apk"
+          OUT="release/uncivCN-X-${TAG}-${STAMP}.apk"
+          cp android/build/outputs/apk/release/*.apk "$OUT"
           ls -1t release/*.apk | tail -n +6 | xargs -r rm -f
           ls -lt release
 
@@ -52,6 +59,15 @@ jobs:
           git add release
           git diff --cached --quiet || git commit -m "Add build artifact"
           git push
+
+      # The in-game updater reads GitHub releases of this repository, so publish one per build.
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.publish.outputs.tag }}
+          name: uncivCN-X ${{ steps.publish.outputs.version }}
+          files: ${{ steps.publish.outputs.apk }}
+          make_latest: true
 
       - uses: actions/upload-artifact@v4
         with:
