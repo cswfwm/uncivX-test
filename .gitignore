@@ -215,3 +215,5 @@ local.properties
 !core/src/com/unciv/ui/components/fonts/
 !core/src/com/unciv/ui/components/fonts/**
 
+!core/src/com/unciv/logic/music/
+!core/src/com/unciv/logic/music/**
