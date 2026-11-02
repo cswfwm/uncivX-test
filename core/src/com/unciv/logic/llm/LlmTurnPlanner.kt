@@ -215,14 +215,38 @@ object LlmTurnPlanner {
     }
 
     private fun applyPolicy(civ: Civilization, plan: JsonObject, applied: MutableList<String>) {
-        val name = plan["policy"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: return
+        val name = plan["policy"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
         if (!civ.policies.canAdoptPolicy()) return
+
+        if (name == null) {
+            // No explicit pick this turn: adopting something is better than banking points.
+            adoptAnyPolicy(civ, applied)
+            return
+        }
         val policy = civ.gameInfo.ruleset.policies[name]
             ?: civ.gameInfo.ruleset.policyBranches[name]
-            ?: return
-        if (!civ.policies.isAdoptable(policy)) return
+        if (policy != null && civ.policies.isAdoptable(policy)) {
+            civ.policies.adopt(policy)
+            applied += "采纳政策 $name"
+            return
+        }
+        // Unknown or still-locked name: fall back rather than silently doing nothing.
+        adoptAnyPolicy(civ, applied)
+    }
+
+    /** Adopts the cheapest available policy; used when the model omitted or misspelled one. */
+    private fun adoptAnyPolicy(civ: Civilization, applied: MutableList<String>) {
+        val branch = civ.policies.adoptableBranches.firstOrNull()
+        if (branch != null) {
+            civ.policies.adopt(branch)
+            applied += "采纳政策分支 ${branch.name}"
+            return
+        }
+        val policy = civ.policies.incompleteBranches.asSequence()
+            .flatMap { it.policies.asSequence() }
+            .firstOrNull { civ.policies.isAdoptable(it) } ?: return
         civ.policies.adopt(policy)
-        applied += "policy $name"
+        applied += "采纳政策 ${policy.name}"
     }
 
     private fun applyCities(civ: Civilization, plan: JsonObject, applied: MutableList<String>) {

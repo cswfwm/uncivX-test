@@ -112,8 +112,17 @@ class AndroidGame(private val activity: Activity) : UncivGame() {
             as? android.view.inputmethod.InputMethodManager
 
         if (editText != null) {
+            // Xiaomi's secure keyboard takes over fields it considers secret. Explicitly disabling
+            // autofill and password suggestions marks this as an ordinary text field.
             editText.inputType = android.text.InputType.TYPE_CLASS_TEXT or
                 android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            // libGDX installs a PasswordTransformationMethod when it creates the field. That flag
+            // is what makes MIUI hand input to its secure keyboard, so clear it explicitly.
+            editText.transformationMethod =
+                android.text.method.SingleLineTransformationMethod.getInstance()
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                editText.importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+            }
             // IMEs such as iFlytek cache the previous input type; without restarting the input
             // they keep showing the password layout even after inputType changes.
             imm?.restartInput(editText)
