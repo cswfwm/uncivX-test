@@ -15,6 +15,8 @@ import com.unciv.logic.llm.EnemyForces
 import com.unciv.logic.llm.LlmDecisionGranularity
 import com.unciv.logic.llm.LlmSettingsHolder
 import com.unciv.logic.llm.LlmTurnPlanner
+import com.unciv.logic.llm.LlmUsage
+import com.unciv.logic.llm.SettingsChanges
 import com.unciv.logic.llm.WarDeclarations
 import com.unciv.ui.components.extensions.disable
 import com.unciv.ui.components.extensions.toTextButton
@@ -247,6 +249,25 @@ class LlmPanel(private val worldScreen: WorldScreen) : Table() {
         if (!settings.autoPlayEachTurn || busy || !settings.isConfigured()) return
         if (!worldScreen.isPlayersTurn || worldScreen.hasOpenPopups()) return
         runAiTurn()
+    }
+
+    /** Asks the player to approve settings the AI proposed. Called from WorldScreen.update. */
+    fun askPendingSettingsChanges() {
+        if (worldScreen.hasOpenPopups()) return
+        val change = SettingsChanges.poll() ?: return
+        val stateText = if (change.requestedValue) "开启" else "关闭"
+        ConfirmPopup(
+            worldScreen,
+            "AI 建议把「${change.displayName}」改为$stateText" +
+                "（当前为${if (change.currentValue) "开启" else "关闭"}），是否同意？",
+            "同意修改",
+            isConfirmPositive = true
+        ) {
+            SettingsChanges.apply(change)
+            logLabel.setText("已按你的同意修改：${change.displayName} → $stateText")
+            rebuild()
+            worldScreen.shouldUpdate = true
+        }.open(true)
     }
 
     /** Asks the player about wars the AI wanted to start. Called from WorldScreen.update. */

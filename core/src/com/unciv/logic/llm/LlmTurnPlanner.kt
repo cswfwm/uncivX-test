@@ -31,8 +31,12 @@ object LlmTurnPlanner {
         "\"cities\": array of {\"name\": city name, \"build\": construction name}; " +
         "\"units\": array of {\"id\": unit id from the state, \"move\": [x,y]} for a destination tile; " +
         "\"reasoning\": one short sentence. " +
+        "\"settings\": array of {\"key\": whitelisted key, \"value\": true/false} to propose settings changes; " +
         "Only use names that appear in the provided game state. Omit anything you are unsure about. " +
-        "Write \"reasoning\" in Simplified Chinese."
+        "Write \"reasoning\" in Simplified Chinese. " +
+        "Never assume a settings change took effect: every entry is shown to the player for approval. " +
+        "Allowed settings keys: " + "autoAssignCityProduction, autoBuildingRoads, automatedUnitsCanUpgrade, " +
+        "automatedUnitsChoosePromotions, citiesAutoBombardAtEndOfTurn, automatedUnitsMoveOnTurnStart."
 
     data class Outcome(
         val applied: List<String>,
@@ -73,6 +77,7 @@ object LlmTurnPlanner {
         try {
             applyResearch(civ, plan, applied)
             applyPolicy(civ, plan, applied)
+            proposeSettings(plan, applied)
             if (granularity == LlmDecisionGranularity.PerItem) {
                 applyCities(civ, plan, applied)
                 applyUnits(civ, plan, applied)
@@ -167,6 +172,18 @@ object LlmTurnPlanner {
         }
         civ.tech.techsToResearch.add(tech)
         applied += "研究 $tech"
+    }
+
+    /** Settings are never applied here: they are queued for the player to approve. */
+    private fun proposeSettings(plan: JsonObject, applied: MutableList<String>) {
+        val requested = plan["settings"] as? JsonArray ?: return
+        for (entry in requested) {
+            val obj = entry as? JsonObject ?: continue
+            val key = obj["key"]?.jsonPrimitive?.content ?: continue
+            val value = obj["value"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: continue
+            if (SettingsChanges.request(key, value))
+                applied += "建议修改设置 $key=$value（待确认）"
+        }
     }
 
     private fun applyPolicy(civ: Civilization, plan: JsonObject, applied: MutableList<String>) {

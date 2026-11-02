@@ -38,6 +38,9 @@ class LlmSettings {
     /** Ask the player before the AI starts a war instead of declaring it directly. */
     var confirmWarDeclarations: Boolean = true
 
+    /** Let the AI look up game mechanics online when a question is about concepts, not the board. */
+    var allowWebSearch: Boolean = false
+
     fun granularityOrDefault(): LlmDecisionGranularity =
         LlmDecisionGranularity.entries.firstOrNull { it.name == granularity }
             ?: LlmDecisionGranularity.Direction

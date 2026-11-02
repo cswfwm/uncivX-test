@@ -62,10 +62,23 @@ object LlmClient {
             val text = response.bodyAsText()
             if (response.status.value !in 200..299)
                 return Result.failure(IllegalStateException("HTTP ${response.status.value}: ${text.take(300)}"))
+            recordUsage(text)
             parseContent(text)
         } catch (ex: Exception) {
             Log.error("LLM request failed: ${ex.message}")
             Result.failure(ex)
+        }
+    }
+
+    /** Relays report `usage`; missing or malformed numbers are simply not counted. */
+    private fun recordUsage(rawBody: String) {
+        try {
+            val usage = json.parseToJsonElement(rawBody).jsonObject["usage"] as? JsonObject ?: return
+            val prompt = usage["prompt_tokens"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+            val completion = usage["completion_tokens"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+            LlmUsage.record(prompt, completion)
+        } catch (ex: Exception) {
+            Log.debug("Could not read token usage: ${ex.message}")
         }
     }
 

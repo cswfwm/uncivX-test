@@ -69,6 +69,7 @@ import com.unciv.ui.screens.mainmenuscreen.EasterEggRulesets.modifyForEasterEgg
 import com.unciv.ui.screens.mapeditorscreen.EditorMapHolder
 import com.unciv.ui.screens.mapeditorscreen.MapEditorScreen
 import com.unciv.ui.screens.modmanager.ModManagementScreen
+import com.unciv.ui.screens.llmguide.AiGuideScreen
 import com.unciv.ui.screens.multiplayerscreens.MultiplayerScreen
 import com.unciv.ui.screens.newgamescreen.NewGameScreen
 import com.unciv.ui.screens.savescreens.LoadGameScreen
@@ -211,6 +212,11 @@ class MainMenuScreen: BaseScreen(), RecreateOnResize {
             game.pushScreen{ ModManagementScreen() }
         }
         column2.add(modsTable).row()
+
+        val aiGuideTable = getMenuButton("AI 指导", "OtherIcons/SecretOptions", KeyboardBinding.ModManager) {
+            game.pushScreen { AiGuideScreen() }
+        }
+        column2.add(aiGuideTable).row()
 
         val optionsTable = getMenuButton("Options", "OtherIcons/Options", KeyboardBinding.MainMenuOptions)
             { openOptionsPopup() }

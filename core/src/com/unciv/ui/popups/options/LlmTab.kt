@@ -53,6 +53,8 @@ internal class LlmTab(
             LlmSettingsHolder.loadFromSettings()
         }
 
+        addCheckbox("允许联网搜索", settings.llm::allowWebSearch)
+
         addCheckbox("宣战前询问", settings.llm::confirmWarDeclarations)
 
         addPlayerIdImport()
@@ -64,6 +66,7 @@ internal class LlmTab(
         }
 
         add(resultLabel).colspan(2).left().row()
+        add(com.unciv.logic.llm.LlmUsage.summary().toLabel(fontSize = 16)).colspan(2).left().row()
 
         super.lateInitialize()
     }
