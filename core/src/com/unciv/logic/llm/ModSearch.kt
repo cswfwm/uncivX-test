@@ -18,8 +18,8 @@ object ModSearch {
      * repository names and descriptions.
      */
     fun keywords(query: String): String =
-        query.replace(Regex("(帮我|请|找|一个|一下|搜索|搜|有没有|推荐|模组|插件|mod|Mod|MOD|的|吗|？|\?)"), " ")
-            .replace(Regex("\\s+"), " ")
+        query.replace(Regex("""(帮我|请|找|一个|一下|搜索|搜|有没有|推荐|模组|插件|mod|Mod|MOD|的|吗|？|\\?)"""), " ")
+            .replace(Regex("""[ \t\n]+"""), " ")
             .trim()
 
     /** @return matching mods, most-starred first, or an empty list when the query finds nothing. */
