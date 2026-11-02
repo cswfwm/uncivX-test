@@ -50,6 +50,7 @@ import kotlin.math.sqrt
 import com.unciv.logic.automation.Timers.Companion.timeThis
 import com.unciv.logic.civilization.managers.quests.QuestManager
 import kotlin.text.toFloat
+import com.unciv.logic.llm.LlmSettingsHolder
 
 enum class Proximity : IsPartOfGameInfoSerialization {
     None, // ie no cities
@@ -230,7 +231,8 @@ class Civilization : IsPartOfGameInfoSerialization {
     // Limit camera within explored region
     var exploredRegion = ExploredRegion()
 
-    @Readonly fun hasExplored(tile: Tile) = tile.isExplored(this)
+    @Readonly fun hasExplored(tile: Tile) =
+        LlmSettingsHolder.isRevealMapEnabled() || tile.isExplored(this)
 
     val lastSeenImprovement = LastSeenImprovement()
 

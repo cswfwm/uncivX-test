@@ -19,6 +19,7 @@ import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.stats.Stat
 import com.unciv.models.stats.StatMap
 import yairm210.purity.annotations.Readonly
+import com.unciv.logic.llm.LlmSettingsHolder
 
 /** View of a [Civilization] from the perspective of [viewer] via [gameView]. */
 class CivView(civ: Civilization,
@@ -55,7 +56,8 @@ class CivView(civ: Civilization,
     @Readonly fun isSpectator(): Boolean = civ.isSpectator()
     /** `true` when this civ is a human player defeated in a singleplayer game - the map is fully revealed for them to watch the game play out. */
     @Readonly fun isMapRevealed(): Boolean = !civ.gameInfo.gameParameters.isOnlineMultiplayer && civ.isCurrentPlayer() && civ.isDefeated()
-    @Readonly fun hasExplored(tileView: TileView): Boolean = civ.hasExplored(tileView.unwrap())
+    @Readonly fun hasExplored(tileView: TileView): Boolean =
+        LlmSettingsHolder.isRevealMapEnabled() || civ.hasExplored(tileView.unwrap())
     @Readonly fun isCurrentPlayer(): Boolean = civ.isCurrentPlayer()
     @Readonly fun isHuman(): Boolean = civ.isHuman()
     @Readonly fun hasMetAnyMajorCiv(): Boolean = civ.getKnownCivs().any { it != civ && !it.isBarbarian }
