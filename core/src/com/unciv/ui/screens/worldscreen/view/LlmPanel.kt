@@ -275,7 +275,14 @@ class LlmPanel(private val worldScreen: WorldScreen) : Table() {
         rebuild()
         val civ = worldScreen.selectedGameView.civView.getCiv()
         Concurrency.run("LlmTurn") {
-            val outcome = LlmTurnPlanner.planTurn(civ, settings)
+            val outcome = try {
+                LlmTurnPlanner.planTurn(civ, settings)
+            } catch (ex: Exception) {
+                // Never leave the panel stuck in "running" if the planner itself throws.
+                LlmTurnPlanner.Outcome(
+                    applied = emptyList(), fallbackUsed = true,
+                    error = ErrorReportPopup.describe(ex))
+            }
             launchOnGLThread {
                 busy = false
                 if (outcome.fallbackUsed) {

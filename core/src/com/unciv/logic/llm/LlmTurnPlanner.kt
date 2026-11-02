@@ -83,9 +83,18 @@ object LlmTurnPlanner {
         }
 
         // Always finish with the stock automation so unfinished parts of the turn are handled.
-        NextTurnAutomation.automateCivMoves(civ)
+        // One failing unit must not strand the turn, so a throw here is reported instead of
+        // propagating into the panel's coroutine and leaving it stuck in the busy state.
+        val automationError = try {
+            NextTurnAutomation.automateCivMoves(civ)
+            null
+        } catch (ex: Exception) {
+            Log.error("Stock automation failed: ${ex.message}")
+            ex.message
+        }
         applied += "其余单位与城市交给内置自动化"
-        return Outcome(applied, fallbackUsed = false, reasoning = reasoningOf(plan))
+        return Outcome(applied, fallbackUsed = false, error = automationError,
+            reasoning = reasoningOf(plan))
     }
 
     private fun buildPrompt(granularity: LlmDecisionGranularity, state: String, warPolicy: String): String {
@@ -160,7 +169,15 @@ object LlmTurnPlanner {
             val tileMap = unit.currentTile.tileMap
             if (!tileMap.contains(x, y)) continue
             val target = tileMap[x, y]
-            val reached = unit.movement.headTowards(target)
+            // A single unreachable destination must not abort the whole AI turn: headTowards
+            // throws UnreachableDestinationException and the stock automation still needs to run
+            // for every other unit.
+            val reached = try {
+                unit.movement.headTowards(target)
+            } catch (ex: Exception) {
+                Log.debug("$name could not reach $x,$y: ${ex.message}")
+                continue
+            }
             if (reached == target) applied += "$name reaches $x,$y"
         }
     }

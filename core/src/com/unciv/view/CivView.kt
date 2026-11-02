@@ -35,7 +35,8 @@ class CivView(civ: Civilization,
     // Data retrieval
     @Readonly fun hasStatToBuy(stat: Stat, price: Int): Boolean = civ.hasStatToBuy(stat, price)
 
-    @Readonly fun canSeeTile(tileView: TileView): Boolean = tileView.unwrap().isVisible(civ)
+    @Readonly fun canSeeTile(tileView: TileView): Boolean =
+        LlmSettingsHolder.isRevealMapEnabled() || tileView.unwrap().isVisible(civ)
     @Readonly fun canSeeResource(resource: TileResource?): Boolean = civ.canSeeResource(resource)
     @Readonly fun canBuildImprovementOn(improvement: TileImprovement, tileView: TileView): Boolean =
         tileView.unwrap().improvementFunctions.canBuildImprovement(improvement, civ.state)
