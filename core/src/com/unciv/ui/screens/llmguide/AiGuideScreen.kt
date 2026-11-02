@@ -173,8 +173,8 @@ class AiGuideScreen : BaseScreen() {
                         val description = parts.getOrElse(2) { "模型未提供说明" }
                         ModSuggestPopup(
                             this, parts[0], parts[1], description
-                        ) {
-                            append("系统", "已记录要下载「${parts[0]}」，请在模组界面确认后下载。")
+                        ) { installedName ->
+                            append("系统", "模组「$installedName」已下载，可在模组界面启用。")
                         }.open()
                     }
                 }
