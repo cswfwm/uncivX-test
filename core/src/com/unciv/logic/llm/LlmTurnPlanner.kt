@@ -29,7 +29,7 @@ object LlmTurnPlanner {
         "\"research\": technology name to research next; " +
         "\"policy\": social policy or branch name to adopt; " +
         "\"cities\": array of {\"name\": city name, \"build\": construction name}; " +
-        "\"units\": array of {\"name\": unit name, \"move\": [x,y]} for a destination tile; " +
+        "\"units\": array of {\"id\": unit id from the state, \"move\": [x,y]} for a destination tile; " +
         "\"reasoning\": one short sentence. " +
         "Only use names that appear in the provided game state. Omit anything you are unsure about. " +
         "Write \"reasoning\" in Simplified Chinese."
@@ -82,17 +82,23 @@ object LlmTurnPlanner {
             return fallback(civ, ex.message)
         }
 
-        // Always finish with the stock automation so unfinished parts of the turn are handled.
-        // One failing unit must not strand the turn, so a throw here is reported instead of
-        // propagating into the panel's coroutine and leaving it stuck in the busy state.
-        val automationError = try {
-            NextTurnAutomation.automateCivMoves(civ)
+        // PerItem means the model owns every unit: whatever it did not name stays put rather than
+        // being handed back to the automation it was meant to replace. Direction mode still needs
+        // the stock pass to turn strategy into moves.
+        val automationError = if (granularity == LlmDecisionGranularity.PerItem) {
+            applyRemainingCityProduction(civ, applied)
             null
-        } catch (ex: Exception) {
-            Log.error("Stock automation failed: ${ex.message}")
-            ex.message
+        } else {
+            try {
+                NextTurnAutomation.automateCivMoves(civ)
+                null
+            } catch (ex: Exception) {
+                Log.error("Stock automation failed: ${ex.message}")
+                ex.message
+            }
         }
-        applied += "其余单位与城市交给内置自动化"
+        if (granularity != LlmDecisionGranularity.PerItem)
+            applied += "其余单位与城市交给内置自动化"
         return Outcome(applied, fallbackUsed = false, error = automationError,
             reasoning = reasoningOf(plan))
     }
@@ -102,9 +108,22 @@ object LlmTurnPlanner {
             "Decide the strategic direction for this turn: research, policy and overall focus. " +
                 "Fill in only \"research\", \"policy\" and \"reasoning\"."
         else
-            "Decide the full turn, including a build order for every city and a destination for " +
-                "each unit that needs orders."
+            "Decide the full turn yourself: give a build order for every city and a destination " +
+                "for every unit you want to move, identified by its id. Units you omit stay where they are."
         return "$task $warPolicy\n\n$state"
+    }
+
+    /** Cities the model left without a build order still need one, or the turn cannot progress. */
+    private fun applyRemainingCityProduction(civ: Civilization, applied: MutableList<String>) {
+        for (city in civ.cities) {
+            if (city.cityConstructions.currentConstructionName().isNotEmpty()) continue
+            try {
+                city.cityConstructions.chooseNextConstruction()
+                applied += "${city.name} 自动选择生产"
+            } catch (ex: Exception) {
+                Log.error("No production for ${city.name}: ${ex.message}")
+            }
+        }
     }
 
     private fun reasoningOf(plan: JsonObject): String? =
@@ -124,9 +143,11 @@ object LlmTurnPlanner {
     private fun applyResearch(civ: Civilization, plan: JsonObject, applied: MutableList<String>) {
         val tech = plan["research"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: return
         if (!civ.tech.canBeResearched(tech)) return
-        civ.tech.techsToResearch.clear()
+        // Research is only chosen once per turn: the queue already runs automatically after the
+        // first pick, so re-applying it every round would keep resetting progress.
+        if (civ.tech.techsToResearch.isNotEmpty()) return
         civ.tech.techsToResearch.add(tech)
-        applied += "research $tech"
+        applied += "研究 $tech"
     }
 
     private fun applyPolicy(civ: Civilization, plan: JsonObject, applied: MutableList<String>) {
@@ -161,11 +182,14 @@ object LlmTurnPlanner {
     private fun applyUnits(civ: Civilization, plan: JsonObject, applied: MutableList<String>) {
         val requested = plan["units"] ?: return
         for (entry in requested.jsonArray) {
-            val name = entry.jsonObject["name"]?.jsonPrimitive?.content ?: continue
+            // Units are identified by their id: several units of the same type share a name.
+            val id = entry.jsonObject["id"]?.jsonPrimitive?.content?.toIntOrNull()
             val coords = entry.jsonObject["move"] ?: continue
             val x = coords.jsonArray.getOrNull(0)?.jsonPrimitive?.content?.toIntOrNull() ?: continue
             val y = coords.jsonArray.getOrNull(1)?.jsonPrimitive?.content?.toIntOrNull() ?: continue
-            val unit = civ.units.getCivUnits().firstOrNull { it.name == name && it.hasTile() } ?: continue
+            val unit = civ.units.getCivUnits().firstOrNull { it.hasTile() && (id == null || it.id == id) }
+                ?: continue
+            val name = unit.name
             val tileMap = unit.currentTile.tileMap
             if (!tileMap.contains(x, y)) continue
             val target = tileMap[x, y]

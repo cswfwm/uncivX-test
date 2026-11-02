@@ -56,7 +56,7 @@ object StateSerializer {
 
     private fun describeUnit(unit: MapUnit): String {
         val position = if (unit.hasTile()) "${unit.currentTile.position.x},${unit.currentTile.position.y}" else "?"
-        return "- ${unit.name} pos=$position hp=${unit.health}/${unit.getMaxHealth()} " +
+        return "- id=${unit.id} ${unit.name} pos=$position hp=${unit.health}/${unit.getMaxHealth()} " +
             "move=${unit.currentMovement}/${unit.getMaxMovement()}"
     }
 
