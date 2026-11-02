@@ -5,6 +5,8 @@
 
 当前版本 **V1.0.0**，仅提供 **Android** 构建，目标为 Android 5.1 (API 21) 及以上，包含 32 位 `armeabi-v7a` 与 64 位 `arm64-v8a`。
 
+本项目自身的变更记录见 [CHANGELOG-CN-X.md](CHANGELOG-CN-X.md)，上游游戏的变更记录见 [changelog.md](changelog.md)。
+
 ## 来源声明
 
 本项目**不是** Unciv 官方版本，也不是文明战争中文社区版的官方发布。
