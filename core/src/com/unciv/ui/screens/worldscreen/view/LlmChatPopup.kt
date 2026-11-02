@@ -110,7 +110,13 @@ class LlmChatPopup(
             launchOnGLThread {
                 waiting = false
                 sendButton.enable()
-                appendLine("AI", result.getOrNull() ?: "请求失败：${result.exceptionOrNull()?.message}")
+                val failure = result.exceptionOrNull()
+                if (failure != null) {
+                    appendLine("AI", "请求失败：${failure.message}")
+                    ErrorReportPopup(worldScreen, "AI 请求失败", ErrorReportPopup.describe(failure)).open()
+                } else {
+                    appendLine("AI", result.getOrNull()!!)
+                }
             }
         }
     }

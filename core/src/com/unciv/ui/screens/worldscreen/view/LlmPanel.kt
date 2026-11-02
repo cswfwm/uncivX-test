@@ -47,6 +47,9 @@ class LlmPanel(private val worldScreen: WorldScreen) : Table() {
     private var expanded = false
     private var busy = false
 
+    /** Last failure detail, shown in [ErrorReportPopup] when the player asks for the log. */
+    private var lastError: String? = null
+
     /** Position of the collapsed orb; kept across rebuilds so dragging sticks. */
     private val orbPosition = Vector2(Float.NaN, Float.NaN)
 
@@ -85,7 +88,7 @@ class LlmPanel(private val worldScreen: WorldScreen) : Table() {
         statusLabel.setText(statusText())
         add(statusLabel).growX().row()
 
-        val enemyStrengths = EnemyForces.of(worldScreen.selectedGameView.civView.getCiv())
+        val enemyStrengths = currentCivStrengths()
         enemyLabel.setText(
             if (enemyStrengths.isEmpty()) "敌方兵力：无交战"
             else "敌方兵力：军事 ${enemyStrengths.sumOf { it.military }}" +
@@ -100,6 +103,12 @@ class LlmPanel(private val worldScreen: WorldScreen) : Table() {
             if (busy) disable()
             onClick { runAiTurn() }
         }.also { add(it).growX().row() }
+
+        if (lastError != null) {
+            "查看日志".toTextButton().apply {
+                onClick { ErrorReportPopup(worldScreen, "AI 操作失败", lastError!!).open() }
+            }.also { add(it).growX().row() }
+        }
 
         (if (settings.granularityOrDefault() == LlmDecisionGranularity.Direction)
             "粒度：定方向" else "粒度：逐项").toTextButton().apply {
@@ -131,6 +140,13 @@ class LlmPanel(private val worldScreen: WorldScreen) : Table() {
 
         pack()
         width = PANEL_WIDTH
+    }
+
+    /** Diplomacy is not always ready while the world screen is still being assembled. */
+    private fun currentCivStrengths(): List<EnemyForces.Strength> = try {
+        EnemyForces.of(worldScreen.selectedGameView.civView.getCiv())
+    } catch (ex: Exception) {
+        emptyList()
     }
 
     private fun buildOrb() {
@@ -241,10 +257,14 @@ class LlmPanel(private val worldScreen: WorldScreen) : Table() {
             val outcome = LlmTurnPlanner.planTurn(civ, settings)
             launchOnGLThread {
                 busy = false
-                logLabel.setText(if (outcome.fallbackUsed)
-                    "回退内置 AI：${outcome.error ?: ""}"
-                else
-                    outcome.applied.take(6).joinToString("\n"))
+                if (outcome.fallbackUsed) {
+                    lastError = outcome.error ?: "未知错误"
+                    logLabel.setText("回退内置 AI，点“查看日志”看原因")
+                    ErrorReportPopup(worldScreen, "AI 操作失败", lastError!!).open()
+                } else {
+                    lastError = null
+                    logLabel.setText(outcome.applied.take(6).joinToString("\n"))
+                }
                 rebuild()
                 worldScreen.shouldUpdate = true
             }

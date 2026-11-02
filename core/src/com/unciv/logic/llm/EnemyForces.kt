@@ -14,7 +14,11 @@ object EnemyForces {
         val total get() = military + civilian
     }
 
-    fun of(civ: Civilization): List<Strength> =
+    /**
+     * Never throws: the panel calls this while the world screen is being built, and on the very
+     * first turn the diplomacy graph is still being populated.
+     */
+    fun of(civ: Civilization): List<Strength> = try {
         civ.getKnownCivs()
             .filter { it != civ && !it.isDefeated() && civ.isAtWarWith(it) }
             .map { enemy ->
@@ -27,6 +31,9 @@ object EnemyForces {
             }
             .sortedByDescending { it.total }
             .toList()
+    } catch (ex: Exception) {
+        emptyList()
+    }
 
     fun summary(strengths: List<Strength>): String {
         if (strengths.isEmpty()) return "当前没有交战中的文明"
