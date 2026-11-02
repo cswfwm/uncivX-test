@@ -104,9 +104,10 @@ class AndroidGame(private val activity: Activity) : UncivGame() {
      * keyboard for ordinary fields such as the API key or the music path.
      */
     override fun showTextKeyboard(visible: Boolean): Boolean {
-        val view = (Gdx.graphics as? AndroidGraphics)?.view ?: return false
-        val editText = (view as? android.view.ViewGroup)?.getChildAt(0) as? android.widget.EditText
-            ?: return false
+        // libGDX wraps the GL surface in a FrameLayout; the EditText lives inside that wrapper,
+        // which is reachable from the activity's content view rather than from Gdx.graphics.view.
+        val content = activity.findViewById<android.view.View>(android.R.id.content) ?: return false
+        val editText = findEditText(content) ?: return false
         editText.inputType = android.text.InputType.TYPE_CLASS_TEXT or
             android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         val imm = activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
@@ -118,6 +119,17 @@ class AndroidGame(private val activity: Activity) : UncivGame() {
             imm?.hideSoftInputFromWindow(editText.windowToken, 0)
         }
         return true
+    }
+
+    /** libGDX nests its EditText somewhere under the GL view, so search instead of guessing. */
+    private fun findEditText(view: android.view.View): android.widget.EditText? {
+        if (view is android.widget.EditText) return view
+        if (view is android.view.ViewGroup) {
+            for (i in 0 until view.childCount) {
+                findEditText(view.getChildAt(i))?.let { return it }
+            }
+        }
+        return null
     }
 
     /** System decoder used for music formats libGDX cannot handle. */
