@@ -32,7 +32,8 @@ object LlmClient {
     suspend fun complete(
         settings: LlmSettings,
         systemPrompt: String,
-        userPrompt: String
+        userPrompt: String,
+        maxTokens: Int = 2048
     ): Result<String> {
         if (!settings.isConfigured())
             return Result.failure(IllegalStateException("LLM endpoint not configured"))
@@ -40,7 +41,7 @@ object LlmClient {
         val payload = buildJsonObject {
             put("model", settings.model)
             put("temperature", 0.3)
-            put("max_tokens", 2048)
+            put("max_tokens", maxTokens)
             put("messages", buildJsonArray {
                 add(buildJsonObject {
                     put("role", "system")
