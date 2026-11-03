@@ -14,6 +14,35 @@ import com.unciv.models.translations.tr
  */
 object StateSerializer {
 
+    /**
+     * Short form for direction-mode turns: economy, research and city list only.
+     *
+     * The full board is what makes prompts expensive and slow, and strategy selection does not
+     * need it - the stock automation still handles placement.
+     */
+    fun describeBriefly(gameInfo: GameInfo, civ: Civilization): String = buildString {
+        appendLine("=== GAME ===")
+        appendLine("turn=${gameInfo.turns} civ=${civ.civName}")
+        val stats = civ.stats.statsForNextTurn
+        appendLine("gold=${civ.gold} science=${stats.science} happiness=${civ.getHappiness()}")
+        appendLine("城市数=${civ.cities.size} 单位数=${civ.units.getCivUnitsSize()}")
+
+        appendLine()
+        appendLine("=== RESEARCH ===")
+        val current = civ.tech.currentTechnologyName()
+        if (current == null) appendLine("正在研发：无（需要选择）")
+        else appendLine("正在研发：${current.tr()}")
+        appendLine("可研究：${researchableTechs(civ).joinToString(", ") { it.tr() }}")
+
+        appendLine()
+        appendLine("=== CITIES ===")
+        for (city in civ.cities) appendLine("- ${city.name} 人口=${city.population.population}")
+
+        appendLine()
+        appendLine("=== DIPLOMACY ===")
+        appendLine(describeDiplomacy(civ))
+    }
+
     fun describe(gameInfo: GameInfo, civ: Civilization): String = buildString {
         appendLine("=== GAME ===")
         appendLine("turn=${gameInfo.turns} civ=${civ.civName} era=${civ.tech.era.name}")
@@ -49,7 +78,11 @@ object StateSerializer {
 
         appendLine()
         appendLine("=== MAP (full board, including unexplored) ===")
-        appendLine(describeMap(gameInfo))
+        if (LlmSettingsHolder.isRevealMapEnabled())
+            appendLine("你拥有全图视野：以下内容包含未探索区域与所有可见文明的位置。")
+        else
+            appendLine("你只能看到已探索区域，未探索部分的信息不可用。")
+        appendLine(describeMap(gameInfo, civ))
     }
 
     private fun researchableTechs(civ: Civilization): List<String> =
@@ -83,7 +116,13 @@ object StateSerializer {
     }
 
     /** One text row per map latitude, with a coarse terrain glyph per tile. */
-    private fun describeMap(gameInfo: GameInfo): String = buildString {
+    /**
+     * Terrain grid plus a legend of everything strategically relevant.
+     *
+     * The model can see the whole board here, so enemy positions, cities and resources are all
+     * listed: without them "full map" would just be a picture of terrain.
+     */
+    private fun describeMap(gameInfo: GameInfo, civ: Civilization): String = buildString {
         val rows = gameInfo.tileMap.values.groupBy { it.position.y }
         for ((latitude, tiles) in rows.toSortedMap()) {
             val line = StringBuilder()
@@ -92,6 +131,39 @@ object StateSerializer {
                 if (tile.getOwner() != null) line.append('*')
             }
             appendLine("y=$latitude $line")
+        }
+
+        appendLine()
+        appendLine("我方单位：")
+        for (unit in civ.units.getCivUnits()) {
+            if (!unit.hasTile()) continue
+            appendLine("- ${unit.name.tr()} id=${unit.id} (${unit.currentTile.position.x},${unit.currentTile.position.y})")
+        }
+
+        appendLine()
+        val reveal = LlmSettingsHolder.isRevealMapEnabled()
+        appendLine(if (reveal) "敌方与中立目标（全图可见）：" else "敌方与中立目标（仅已探索）：")
+        fun visible(tile: com.unciv.logic.map.tile.Tile) = reveal || tile.isExplored(civ)
+        val enemyCities = gameInfo.civilizations
+            .filter { it != civ && !it.isDefeated() }
+            .flatMap { it.cities }
+            .filter { city -> city.getCenterTileOrNull()?.let { visible(it) } == true }
+        for (city in enemyCities) {
+            appendLine("- ${city.civ.civName} 城市 ${city.name.tr()} " +
+                "(${city.location.x},${city.location.y}) 城防 ${city.health}")
+        }
+        for (unit in gameInfo.civilizations.filter { it != civ }.flatMap { it.units.getCivUnits() }) {
+            if (!unit.hasTile() || !visible(unit.currentTile)) continue
+            val owner = unit.civ.civName
+            appendLine("- $owner ${unit.name.tr()} (${unit.currentTile.position.x},${unit.currentTile.position.y})")
+        }
+
+        appendLine()
+        appendLine("资源点：")
+        val resources = gameInfo.tileMap.values.filter { it.resource != null && visible(it) }
+        for (tile in resources.take(60)) {
+            val owner = tile.getOwner()?.civName ?: "无主"
+            appendLine("- ${tile.resource} (${tile.position.x},${tile.position.y}) 归属 $owner")
         }
     }
 

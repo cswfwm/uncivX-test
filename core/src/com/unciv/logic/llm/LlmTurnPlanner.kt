@@ -42,6 +42,9 @@ object LlmTurnPlanner {
         "\"reasoning\": one short sentence. " +
         "\"settings\": array of {\"key\": whitelisted key, \"value\": true/false} to propose settings changes; " +
         "The game state uses Chinese names; reuse those exact names in your answer. " +
+        "You see the entire map including unexplored tiles: use the listed enemy units, cities and " +
+        "resources. Move units toward the closest useful target, defend your cities, and send " +
+        "settlers to unclaimed resources rather than wandering. " +
         "Write \"reasoning\" in Simplified Chinese. " +
         "Never assume a settings change took effect: every entry is shown to the player for approval. " +
         "Allowed settings keys: " + "autoAssignCityProduction, autoBuildingRoads, automatedUnitsCanUpgrade, " +
@@ -61,14 +64,21 @@ object LlmTurnPlanner {
         onLog: (String) -> Unit = {}
     ): Outcome {
         val granularity = settings.granularityOrDefault()
-        val state = StateSerializer.describe(civ.gameInfo, civ)
+        // Direction mode only picks research/policy, so skip the full board dump.
+        val state = if (granularity == LlmDecisionGranularity.Direction)
+            StateSerializer.describeBriefly(civ.gameInfo, civ)
+        else
+            StateSerializer.describe(civ.gameInfo, civ)
         val warPolicy = if (settings.confirmWarDeclarations)
             "Wars are proposed to the player for approval, never declared silently."
         else
             "Wars may be declared directly."
         val advice = StrategyGuide.adviceFor(civ)
+        // Direction mode answers with a couple of short fields; capping output keeps the turn
+        // responsive instead of waiting for the model to fill a long budget.
+        val tokenBudget = if (granularity == LlmDecisionGranularity.Direction) 320 else 1400
         val answer = LlmClient.complete(
-            settings, SYSTEM_PROMPT, buildPrompt(granularity, state, warPolicy, advice))
+            settings, SYSTEM_PROMPT, buildPrompt(granularity, state, warPolicy, advice), tokenBudget)
 
         if (answer.isFailure) {
             val message = answer.exceptionOrNull()?.message ?: "unknown error"
@@ -127,7 +137,8 @@ object LlmTurnPlanner {
     ): String {
         val task = if (granularity == LlmDecisionGranularity.Direction)
             "Decide the strategic direction for this turn: research, policy and overall focus. " +
-                "Fill in only \"research\", \"policy\" and \"reasoning\"."
+                "Answer immediately with \"research\", \"policy\" and a one-line \"reasoning\"; " +
+                "do not deliberate, the answer is a short pick from the listed techs."
         else
             "Decide the full turn yourself. Give every city a build order: put the unit name in " +
                 "\"build\" when you want more troops. Give a destination for every unit you want " +
@@ -218,21 +229,35 @@ object LlmTurnPlanner {
     }
 
     private fun applyResearch(civ: Civilization, plan: JsonObject, applied: MutableList<String>) {
-        val requested = plan["research"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: return
-        val tech = resolveTechName(civ, requested) ?: return
-        if (!civ.tech.canBeResearched(tech)) return
-
-        // A technology already being researched owns the slot: changing it throws away every
-        // science point invested so far, and the model has no reason to do that.
+        // An existing research choice owns the slot: changing it throws away every science point
+        // invested so far, and the model has no reason to do that.
         val inProgress = civ.tech.currentTechnologyName() ?: civ.tech.techsToResearch.firstOrNull()
-        if (inProgress != null) {
-            if (inProgress != tech)
-                Log.debug("Ignoring research change from $inProgress to $tech")
+        if (inProgress != null) return
+
+        val requested = plan["research"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+        val tech = requested?.let { resolveTechName(civ, it) }
+        if (tech != null && civ.tech.canBeResearched(tech)) {
+            civ.tech.techsToResearch.add(tech)
+            applied += "研究 ${tech.tr()}"
             return
         }
-        civ.tech.techsToResearch.add(tech)
-        applied += "研究 $tech"
+
+        // The model omitted or named something unavailable. Leaving science idle wastes a whole
+        // turn, so pick the cheapest researchable technology instead.
+        val fallback = cheapestResearchable(civ) ?: return
+        if (requested != null)
+            Log.debug("Research '$requested' unusable, falling back to $fallback")
+        civ.tech.techsToResearch.add(fallback)
+        applied += "研究 ${fallback.tr()}（自动选择）"
     }
+
+    /** Cheapest technology the civ can start right now. */
+    private fun cheapestResearchable(civ: Civilization): String? =
+        civ.gameInfo.ruleset.technologies.values
+            .asSequence()
+            .filter { civ.tech.canBeResearched(it.name) && it.cost > 0 }
+            .minByOrNull { it.cost }
+            ?.name
 
     /** Settings are never applied here: they are queued for the player to approve. */
     private fun proposeSettings(plan: JsonObject, applied: MutableList<String>) {
