@@ -41,6 +41,8 @@ internal class LlmTab(
 
         addCheckbox("每回合自动操作", settings.llm::autoPlayEachTurn)
 
+        addCheckbox("联机时自动点「我完成了」", settings.llm::autoFinishTurn)
+
         addCheckbox("显示全图", settings.llm::revealMap, updateWorld = true) {
             LlmSettingsHolder.loadFromSettings()
         }

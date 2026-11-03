@@ -127,18 +127,23 @@ class LlmPanel(private val worldScreen: WorldScreen) : Table() {
                         LlmDecisionGranularity.PerItem.name
                     else
                         LlmDecisionGranularity.Direction.name
+                // Persist immediately: the choice must survive leaving the game.
+                worldScreen.game.settings.save()
                 rebuild()
             }
         }.also { add(it).width(PANEL_WIDTH - 16f).row() }
 
         toggleRow("全图视野", settings.revealMap) {
             LlmSettingsHolder.setRevealMap(it)
+            worldScreen.game.settings.save()
         }
         toggleRow("敌方雷达", settings.showEnemyRadar) {
             LlmSettingsHolder.setEnemyRadar(it)
+            worldScreen.game.settings.save()
         }
         toggleRow("单位名称", settings.showUnitNames) {
             LlmSettingsHolder.setUnitNames(it)
+            worldScreen.game.settings.save()
         }
 
         logLabel.setAlignment(Align.topLeft)
@@ -322,7 +327,25 @@ class LlmPanel(private val worldScreen: WorldScreen) : Table() {
                 }
                 rebuild()
                 worldScreen.shouldUpdate = true
+                if (!outcome.fallbackUsed) finishTurnIfRequested()
             }
         }
+    }
+
+    /**
+     * Submits the turn once the AI has acted, when the player opted into automatic submission.
+     *
+     * Only applies to multiplayer games: single player has no "I'm done" step, and the player
+     * keeps control of the next-turn button there.
+     */
+    private fun finishTurnIfRequested() {
+        if (!settings.autoFinishTurn) return
+        val info = worldScreen.gameInfo
+        if (!info.gameParameters.isOnlineMultiplayer) return
+        if (!worldScreen.isPlayersTurn) return
+        if (worldScreen.hasOpenPopups()) return
+
+        if (info.isSimultaneousTurnsMode()) worldScreen.finishSimultaneousTurn()
+        else if (info.isPollingMode()) worldScreen.finishPollingTurn()
     }
 }

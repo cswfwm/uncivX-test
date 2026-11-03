@@ -20,6 +20,13 @@ class LlmSettings {
     /** Whether the AI plans each turn automatically, or only when the panel button is pressed. */
     var autoPlayEachTurn: Boolean = false
 
+    /**
+     * In multiplayer, press "I'm done" automatically once the AI finished its turn.
+     *
+     * Off by default: submitting ends the player's window, so this should be a deliberate choice.
+     */
+    var autoFinishTurn: Boolean = false
+
     /** [LlmDecisionGranularity.name] */
     var granularity: String = LlmDecisionGranularity.Direction.name
 
