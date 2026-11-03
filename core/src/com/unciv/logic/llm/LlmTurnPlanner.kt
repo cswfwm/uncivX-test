@@ -42,6 +42,9 @@ object LlmTurnPlanner {
         "\"reasoning\": one short sentence. " +
         "\"settings\": array of {\"key\": whitelisted key, \"value\": true/false} to propose settings changes; " +
         "The game state uses Chinese names; reuse those exact names in your answer. " +
+        "Every city can build any unit listed under its 可生产单位 - production per turn does not " +
+        "block construction, it only changes how many turns it takes. Never claim you cannot build " +
+        "something while it appears in that list. " +
         "You see the entire map including unexplored tiles: use the listed enemy units, cities and " +
         "resources. Move units toward the closest useful target, defend your cities, and send " +
         "settlers to unclaimed resources rather than wandering. " +

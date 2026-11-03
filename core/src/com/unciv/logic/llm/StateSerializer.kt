@@ -92,10 +92,15 @@ object StateSerializer {
 
     private fun describeCity(city: City): String {
         val stats = city.cityStats.currentCityStats
-        val construction = city.cityConstructions.currentConstructionName().ifEmpty { "none" }
-        return "- ${city.name} pop=${city.population.population} hp=${city.health} " +
-            "pos=${city.location.x},${city.location.y} building=$construction " +
-            "food=${stats.food} prod=${stats.production} gold=${stats.gold} sci=${stats.science} cult=${stats.culture}"
+        val construction = city.cityConstructions.currentConstructionName().ifEmpty { "（空闲，必须指定）" }
+        val buildable = city.cityConstructions.getConstructableUnits()
+            .map { it.name.tr() }
+            .toList()
+        return "- ${city.name} 人口=${city.population.population} 城防=${city.health} " +
+            "坐标=${city.location.x},${city.location.y} 正在建造：$construction " +
+            "每回合 食物=${stats.food} 生产=${stats.production} 金币=${stats.gold} " +
+            "科研=${stats.science} 文化=${stats.culture}\n" +
+            "  可生产单位：${if (buildable.isEmpty()) "无可造单位" else buildable.joinToString("、")}"
     }
 
     private fun describeUnit(unit: MapUnit): String {

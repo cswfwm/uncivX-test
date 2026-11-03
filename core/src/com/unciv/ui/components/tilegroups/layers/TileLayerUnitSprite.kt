@@ -8,6 +8,7 @@ import com.unciv.logic.llm.LlmSettingsHolder
 import com.unciv.view.CivView
 import com.unciv.view.ForeignMapUnitView
 import com.unciv.ui.components.NonTransformGroup
+import com.unciv.models.translations.tr
 import com.unciv.ui.components.fonts.Fonts
 import com.unciv.ui.components.tilegroups.TileGroup
 import com.unciv.ui.images.ImageGetter
@@ -126,7 +127,7 @@ class TileLayerUnitSprite(tileGroup: TileGroup, size: Float) : TileLayer(tileGro
             val label = unitNameLabel ?: Label("", Label.LabelStyle(Fonts.font, Color.WHITE)).apply {
                 addOwnedActor(this)
             }
-            label.setText(unitView.name)
+            label.setText(unitView.name.tr())
             label.setPosition(tileX + tileGroup.hexagonImagePosition.first,
                 tileY + tileGroup.hexagonImagePosition.second + tileGroup.hexagonImageWidth * 0.5f)
             label.setSize(hexagonWidth(), tileGroup.hexagonImageWidth * 0.25f)
