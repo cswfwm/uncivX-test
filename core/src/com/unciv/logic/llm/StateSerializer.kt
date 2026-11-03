@@ -152,10 +152,19 @@ object StateSerializer {
             appendLine("- ${city.civ.civName} 城市 ${city.name.tr()} " +
                 "(${city.location.x},${city.location.y}) 城防 ${city.health}")
         }
+        // Every enemy unit carries its coordinates so the model can reason about positions, and
+        // units near our cities are flagged inline instead of moving to a separate list that the
+        // model could read as "not relevant".
         for (unit in gameInfo.civilizations.filter { it != civ }.flatMap { it.units.getCivUnits() }) {
             if (!unit.hasTile() || !visible(unit.currentTile)) continue
             val owner = unit.civ.civName
-            appendLine("- $owner ${unit.name.tr()} (${unit.currentTile.position.x},${unit.currentTile.position.y})")
+            val x = unit.currentTile.position.x
+            val y = unit.currentTile.position.y
+            val nearest = civ.cities.minByOrNull { it.getCenterTile().aerialDistanceTo(unit.currentTile) }
+            val distance = nearest?.getCenterTile()?.aerialDistanceTo(unit.currentTile)
+            val note = if (distance == null) "" else "，距 ${nearest!!.name.tr()} $distance 格"
+            val alert = if (distance != null && distance <= 3 && unit.isMilitary()) " ⚠逼近我方城市" else ""
+            appendLine("- $owner ${unit.name.tr()} ($x,$y)$note$alert")
         }
 
         appendLine()
