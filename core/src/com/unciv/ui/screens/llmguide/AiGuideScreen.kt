@@ -119,7 +119,6 @@ class AiGuideScreen : BaseScreen() {
                 background = null
             }
         ).apply {
-            isFocusTraversal = false
             // Read-only but still selectable: typing is rejected, dragging selects for copying.
             setTextFieldFilter { _, _ -> false }
         }

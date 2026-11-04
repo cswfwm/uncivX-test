@@ -18,9 +18,9 @@ import com.unciv.ui.screens.basescreen.BaseScreen
  * Applying is always explicit - nothing is activated just by opening this screen.
  */
 class AiTendencyPopup(
-    screen: BaseScreen,
+    stage: com.badlogic.gdx.scenes.scene2d.Stage,
     private val onApplied: (String) -> Unit = {}
-) : Popup(screen, Scrollability.None) {
+) : Popup(stage, Scrollability.None) {
 
     private val listTable = Table(BaseScreen.skin)
     private val status = "".toLabel(fontSize = 15)
