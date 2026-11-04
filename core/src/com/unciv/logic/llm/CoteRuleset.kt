@@ -51,7 +51,8 @@ data class CoteRule(
     /** One sentence the model reads. Keep it a concrete instruction, not a vague goal. */
     val text: String,
     /** Optional condition key; see [CoteRulesetLoader.CONDITIONS] for the supported values. */
-    val when: String? = null
+    @kotlinx.serialization.SerialName("when")
+    val condition: String? = null
 )
 
 object CoteRulesetLoader {
@@ -102,7 +103,7 @@ object CoteRulesetLoader {
             return Result.failure(IllegalArgumentException("format 必须是 \"cote\""))
         if (ruleset.version != 1)
             return Result.failure(IllegalArgumentException("不支持的版本：${ruleset.version}"))
-        val unknown = ruleset.rules.mapNotNull { it.when }.filter { it !in CONDITIONS }
+        val unknown = ruleset.rules.mapNotNull { it.condition }.filter { it !in CONDITIONS }
         if (unknown.isNotEmpty())
             return Result.failure(IllegalArgumentException("未知的条件：${unknown.joinToString(", ")}"))
         val ids = ruleset.rules.map { it.id }
@@ -150,10 +151,10 @@ object CoteRulesetLoader {
     /** Rules whose condition matches the current context. */
     fun activeRules(): List<CoteRule> {
         val ruleset = active ?: return emptyList()
-        val civ = currentCivOrNull() ?: return ruleset.rules.filter { it.when == null || it.when == "always" }
+        val civ = currentCivOrNull() ?: return ruleset.rules.filter { it.condition == null || it.condition == "always" }
         val context = StrategyGuide.contextOf(civ)
         return ruleset.rules.filter { rule ->
-            when (rule.when) {
+            when (rule.condition) {
                 null, "always" -> true
                 "earlyGame" -> context.isEarlyGame
                 "atWar" -> context.isAtWar
@@ -181,9 +182,9 @@ object CoteRulesetLoader {
             tradeProfit = 65, betrayal = 10, militaryFocus = 45, scienceFocus = 60
         ),
         rules = listOf(
-            CoteRule("open-settle", "前 60 回合优先生产开拓者，尽量在优质地块建城。", "earlyGame"),
-            CoteRule("guard-capital", "首都始终保留至少一个军事单位驻守。", "always"),
-            CoteRule("war-economy", "交战时把产能优先给军事单位。", "atWar")
+            CoteRule("open-settle", "前 60 回合优先生产开拓者，尽量在优质地块建城。", condition = "earlyGame"),
+            CoteRule("guard-capital", "首都始终保留至少一个军事单位驻守。", condition = "always"),
+            CoteRule("war-economy", "交战时把产能优先给军事单位。", condition = "atWar")
         )
     )
 
