@@ -190,6 +190,21 @@ object CoteRulesetLoader {
 
     fun exampleText(): String = json.encodeToString(CoteRuleset.serializer(), example())
 
+    /** Saves a rule set produced by the AI or edited by the player, returning the written file. */
+    fun save(ruleset: CoteRuleset): Result<FileHandle> {
+        val invalid = validate(ruleset)
+        if (invalid.isFailure)
+            return Result.failure(invalid.exceptionOrNull()!!)
+        return try {
+            val safeName = ruleset.name.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "ruleset" }
+            val file = folder().child("$safeName.$EXTENSION")
+            file.writeString(json.encodeToString(CoteRuleset.serializer(), ruleset), false, "UTF-8")
+            Result.success(file)
+        } catch (ex: Exception) {
+            Result.failure(ex)
+        }
+    }
+
     /** Writes the example into the ruleset folder so players have a starting point. */
     fun writeExample(): FileHandle {
         val file = folder().child("example.$EXTENSION")

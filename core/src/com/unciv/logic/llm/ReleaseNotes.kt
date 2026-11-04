@@ -18,6 +18,15 @@ object ReleaseNotes {
     /** Newest first. Keep this in sync with CHANGELOG-CN-X.md when releasing. */
     val changelog: List<Entry> = listOf(
         Entry(
+            "1.3.0", "2026-11-05",
+            listOf(
+                "AI 指导：对话内容可选中复制，并新增「复制全部对话」",
+                "AI 指导：可让 AI 直接生成规则集并保存到 AI 趋势库",
+                "新增「AI 趋势」界面：列出所有规则集，可查看倾向与规则说明",
+                "AI 趋势：每份规则集需手动点「导入」才生效"
+            )
+        ),
+        Entry(
             "1.2.0", "2026-11-05",
             listOf(
                 "新增 AI 规则集：可用 .cote 文件自定义 AI 的操作倾向",

@@ -111,6 +111,10 @@ internal class LlmTab(
         label.setText("当前：$activeName")
 
         addWrapped {
+            add("浏览 AI 趋势".toTextButton().apply {
+                onClick { com.unciv.ui.screens.llmguide.AiTendencyPopup(optionsPopup.stage).open() }
+            }).padRight(6f)
+
             add("重新读取规则集".toTextButton().apply {
                 onClick {
                     val files = com.unciv.logic.llm.CoteRulesetLoader.available()

@@ -65,6 +65,18 @@ class AiGuideScreen : BaseScreen() {
         val downloads = "下载列表".toTextButton()
         downloads.onClick { ModDownloadListPopup(this).open() }
         tools.add(downloads).padRight(8f)
+
+        val tendency = "AI 趋势".toTextButton()
+        tendency.onClick { AiTendencyPopup(this).open() }
+        tools.add(tendency).padRight(8f)
+
+        val copyAll = "复制全部对话".toTextButton()
+        copyAll.onClick {
+            val all = ChatHistory.all().joinToString("\n") { "${it.who}：${it.text}" }
+            com.badlogic.gdx.Gdx.app.clipboard.contents = all
+            append("系统", "已复制 ${ChatHistory.all().size} 条对话到剪贴板")
+        }
+        tools.add(copyAll).padRight(8f)
         usageLabel.setText(LlmUsage.summary())
         tools.add(usageLabel).expandX().left()
         root.add(tools).growX().row()
@@ -98,10 +110,20 @@ class AiGuideScreen : BaseScreen() {
     }
 
     private fun append(who: String, text: String, persist: Boolean = true) {
-        val label = Label("$who：$text", BaseScreen.skin)
-        label.wrap = true
-        label.setAlignment(Align.topLeft)
-        transcript.add(label).row()
+        // A read-only text field instead of a Label: Labels cannot be selected, and players need
+        // to copy AI answers out of the console.
+        val field = com.badlogic.gdx.scenes.scene2d.ui.TextField(
+            "$who：$text",
+            com.badlogic.gdx.scenes.scene2d.ui.TextField.TextFieldStyle(BaseScreen.skin.get(
+                com.badlogic.gdx.scenes.scene2d.ui.TextField.TextFieldStyle::class.java)).apply {
+                background = null
+            }
+        ).apply {
+            isFocusTraversal = false
+            // Read-only but still selectable: typing is rejected, dragging selects for copying.
+            setTextFieldFilter { _, _ -> false }
+        }
+        transcript.add(field).growX().row()
         scrollPane.layout()
         scrollPane.scrollTo(0f, 0f, 0f, 0f)
         if (persist) ChatHistory.add(who, text)
@@ -206,6 +228,22 @@ class AiGuideScreen : BaseScreen() {
         for (line in answer.lines()) {
             val trimmed = line.trimStart()
             when {
+                trimmed.startsWith("COTE:") -> {
+                    // The model emits the rule set as a whole JSON object after this marker.
+                    val json = answer.substringAfter("COTE:", "").trim()
+                    val parsed = com.unciv.logic.llm.CoteRulesetLoader.parse(json)
+                    parsed.onSuccess { ruleset ->
+                        val saved = com.unciv.logic.llm.CoteRulesetLoader.save(ruleset)
+                        saved.onSuccess { file ->
+                            append("系统", "已保存规则集「${ruleset.name}」到 ${file.name()}，" +
+                                "可在「AI 趋势」里查看并导入。")
+                        }.onFailure {
+                            append("系统", "规则集保存失败：${it.message}")
+                        }
+                    }.onFailure {
+                        append("系统", "规则集格式有误：${it.message}")
+                    }
+                }
                 trimmed.startsWith("MOD:") -> {
                     val parts = trimmed.removePrefix("MOD:").split("|").map { it.trim() }
                     if (parts.size >= 2) {
@@ -288,6 +326,9 @@ class AiGuideScreen : BaseScreen() {
             可用的设置键：autoAssignCityProduction, autoBuildingRoads,
             automatedUnitsCanUpgrade, automatedUnitsChoosePromotions,
             citiesAutoBombardAtEndOfTurn, automatedUnitsMoveOnTurnStart
+            如果玩家要你生成规则集/倾向配置，先用一两句话说明思路，然后另起一行写：
+            COTE: 后面紧跟完整的 JSON（format/version/name/description/tendencies/rules）
+            字段含义见规则集文档；name 用中文简短命名，rules 每条要具体可执行。
             不要自行假设这些操作已被执行。
         """.trimIndent()
     }
