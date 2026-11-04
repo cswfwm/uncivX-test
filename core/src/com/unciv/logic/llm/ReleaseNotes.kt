@@ -18,6 +18,18 @@ object ReleaseNotes {
     /** Newest first. Keep this in sync with CHANGELOG-CN-X.md when releasing. */
     val changelog: List<Entry> = listOf(
         Entry(
+            "1.2.0", "2026-11-05",
+            listOf(
+                "新增 AI 规则集：可用 .cote 文件自定义 AI 的操作倾向",
+                "规则集支持七项倾向值：进攻性、扩张、外交、交易抬价、毁约、军事、科研",
+                "规则集支持按条件生效的条目：开局、交战、幸福为负、金币为负、城少",
+                "设置页可加载、停用规则集，并可一键生成示例文件",
+                "AI 增加经济规则：幸福为负先解决幸福，金币为负先止损",
+                "AI 增加外交规则：交易抬价、保证己方不亏、避免多线开战",
+                "AI 增加背叛判断：只有能实际获利时才背弃协议"
+            )
+        ),
+        Entry(
             "1.1.2", "2026-11-05",
             listOf(
                 "AI 更主动造兵：目标兵力提升为每城 2 个，开战时额外加 3 个",

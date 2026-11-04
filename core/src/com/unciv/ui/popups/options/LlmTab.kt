@@ -59,6 +59,8 @@ internal class LlmTab(
 
         addCheckbox("宣战前询问", settings.llm::confirmWarDeclarations)
 
+        addRulesetSection()
+
         addPlayerIdImport()
 
         addWrapped {
@@ -100,6 +102,49 @@ internal class LlmTab(
     }
 
     /** Import an existing multiplayer player ID from the clipboard, reusing the game's own flow. */
+    /** Load a player-written `.cote` rule set that steers the AI's tendencies. */
+    private fun addRulesetSection() {
+        addHeader("AI 规则集")
+
+        val label = "".toLabel(fontSize = 15)
+        val activeName = com.unciv.logic.llm.CoteRulesetLoader.active?.name ?: "未加载（使用内置规则）"
+        label.setText("当前：$activeName")
+
+        addWrapped {
+            add("重新读取规则集".toTextButton().apply {
+                onClick {
+                    val files = com.unciv.logic.llm.CoteRulesetLoader.available()
+                    if (files.isEmpty()) {
+                        label.setText("规则集目录为空，可先点“生成示例文件”")
+                        return@onClick
+                    }
+                    val latest = files.maxByOrNull { it.lastModified() }!!
+                    com.unciv.logic.llm.CoteRulesetLoader.load(latest)
+                        .onSuccess { label.setText("已加载：${it.name}") }
+                        .onFailure { label.setText("加载失败：${it.message}") }
+                }
+            }).padRight(6f)
+
+            add("生成示例文件".toTextButton().apply {
+                onClick {
+                    val file = com.unciv.logic.llm.CoteRulesetLoader.writeExample()
+                    label.setText("已生成：${file.name()}，可编辑后重新读取")
+                }
+            }).padRight(6f)
+
+            add("停用规则集".toTextButton().apply {
+                onClick {
+                    com.unciv.logic.llm.CoteRulesetLoader.clear()
+                    label.setText("已停用，使用内置规则")
+                }
+            })
+        }
+
+        add(label).colspan(2).left().row()
+        add("规则集放在游戏目录的 rulesets 文件夹，后缀 .cote，内容为 JSON".toLabel(fontSize = 13))
+            .colspan(2).left().row()
+    }
+
     private fun addPlayerIdImport() {
         addHeader("玩家 ID")
 

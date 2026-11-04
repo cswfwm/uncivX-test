@@ -149,7 +149,17 @@ object LlmTurnPlanner {
                 "to move, identified by its id. Cities and units you omit fall back to a safe default."
         val strategy = buildString {
             appendLine(StrategyGuide.openingDoctrine)
+            appendLine(StrategyGuide.diplomacyDoctrine)
             for (line in advice) appendLine("- $line")
+
+            // Player-supplied rule set takes precedence over the built-in doctrine.
+            val custom = CoteRulesetLoader.active
+            if (custom != null) {
+                appendLine("玩家自定义规则集：${custom.name}")
+                appendLine(CoteRulesetLoader.tendencyText())
+                for (rule in CoteRulesetLoader.activeRules())
+                    appendLine("- [${rule.id}] ${rule.text}")
+            }
         }
         return "$task $warPolicy\n\n" +
             "战略参考（按本局形势筛选）：\n$strategy\n" +

@@ -26,7 +26,10 @@ object StrategyGuide {
         val workerCount: Int,
         val isEarlyGame: Boolean,
         val isAtWar: Boolean,
-        val isBehindInCities: Boolean
+        val isBehindInCities: Boolean,
+        val happiness: Int,
+        val goldPerTurn: Int,
+        val totalPopulation: Int
     )
 
     fun contextOf(civ: Civilization): StrategyContext {
@@ -45,7 +48,10 @@ object StrategyGuide {
             workerCount = workerCount,
             isEarlyGame = civ.gameInfo.turns <= 60,
             isAtWar = civ.isAtWar(),
-            isBehindInCities = behindInCities
+            isBehindInCities = behindInCities,
+            happiness = civ.getHappiness(),
+            goldPerTurn = civ.stats.statsForNextTurn.gold.toInt(),
+            totalPopulation = civ.cities.sumOf { it.population.population }
         )
     }
 
@@ -80,8 +86,45 @@ object StrategyGuide {
         Rule(
             applies = { it.isAtWar },
             text = "战时优先保证军事生产与前线的单位补充，避免在后方堆叠无用的建筑。"
+        ),
+        Rule(
+            applies = { it.happiness < 0 },
+            text = "幸福度为负会直接削减产能与人口增长，此时优先解决幸福：" +
+                "连奢侈品、造竞技场一类建筑，停止继续铺城，直到回到 0 以上。"
+        ),
+        Rule(
+            applies = { it.happiness in 0..3 && it.cityCount >= 3 },
+            text = "幸福度接近临界，铺城或涨人口前先确认有新的奢侈品来源，" +
+                "否则新增城市会立刻把幸福拖成负数。"
+        ),
+        Rule(
+            applies = { it.goldPerTurn < 0 },
+            text = "金币为负会开始解散单位并拖慢科研，应减少军事维持、卖建筑或提高贸易收入。"
+        ),
+        Rule(
+            applies = { it.totalPopulation < it.cityCount * 3 && it.happiness >= 3 },
+            text = "人口偏少说明城市没有在长人口，检查是否粮食不足或被产能偏移带偏；" +
+                "幸福有余量时优先水车、粮仓一类增长类建筑。"
+        ),
+        Rule(
+            applies = { true },
+            text = "平衡原则：产能应与人口匹配。人口少时堆产能是浪费，人口多而产能低会长期落后；" +
+                "每座城市至少保证有粮食来源，再考虑专业化。"
         )
     )
+
+    /** Diplomacy doctrine, always included: the game rewards trading and punishes blind aggression. */
+    val diplomacyDoctrine: String =
+        "外交原则：
+" +
+            "- 交易时先判断对方是否急需，急需的物品可以抬价；和平时期多签订开放边界、研究协定，" +
+            "这些长期收益高于一次性金币。\n" +
+            "- 每一笔交易都要保证自己不亏：用富余的奢侈品换对方稀缺资源，避免用战略资源换金币。\n" +
+            "- 不要同时与多方交恶。宣战前确认目标孤立、无强力盟友，且自己已有兵力与后方保障。\n" +
+            "- 盟友价值会随局势变化：当盟友变弱或占住你需要的土地时，可以结束同盟，但不要在" +
+            "自己兵力不足时翻脸。\n" +
+            "- 背叛要有收益：只有在能实际拿到城市、资源或决定性优势时才考虑背弃协议，" +
+            "否则损失的外交信誉会拖累整局。"
 
     /** Rules matching this turn, in priority order. */
     fun adviceFor(civ: Civilization): List<String> {
