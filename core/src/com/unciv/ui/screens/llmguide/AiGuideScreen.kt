@@ -67,7 +67,7 @@ class AiGuideScreen : BaseScreen() {
         tools.add(downloads).padRight(8f)
 
         val tendency = "AI 趋势".toTextButton()
-        tendency.onClick { AiTendencyPopup(this).open() }
+        tendency.onClick { AiTendencyPopup(stage).open() }
         tools.add(tendency).padRight(8f)
 
         val copyAll = "复制全部对话".toTextButton()
