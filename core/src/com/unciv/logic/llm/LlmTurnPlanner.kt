@@ -143,8 +143,9 @@ object LlmTurnPlanner {
                 "Answer immediately with \"research\", \"policy\" and a one-line \"reasoning\"; " +
                 "do not deliberate, the answer is a short pick from the listed techs."
         else
-            "Decide the full turn yourself. Give every city a build order: put the unit name in " +
-                "\"build\" when you want more troops. Give a destination for every unit you want " +
+            "Decide the full turn yourself. Give every city a build order. Keep at least two " +
+                "military units per city, more when at war - put a military unit name in " +
+                "\"build\" to produce troops, buildings only once that target is met. Give a destination for every unit you want " +
                 "to move, identified by its id. Cities and units you omit fall back to a safe default."
         val strategy = buildString {
             appendLine(StrategyGuide.openingDoctrine)
@@ -164,15 +165,29 @@ object LlmTurnPlanner {
      * chooser so growth and infrastructure keep moving.
      */
     private fun applyRemainingCityProduction(civ: Civilization, applied: MutableList<String>) {
-        val military = civ.units.getCivUnits().count { it.isMilitary() }
-        val needsTroops = military < civ.cities.size * 2
+        val units = civ.units.getCivUnits().toList()
+        val military = units.count { it.isMilitary() }
+        // Target rises with the number of cities and when a war is running: a bare minimum of one
+        // defender per city leaves the empire unable to answer an attack.
+        val warBonus = if (civ.isAtWar()) 3 else 0
+        val targetArmy = civ.cities.size * 2 + warBonus
+        var deficit = (targetArmy - military).coerceAtLeast(0)
+
         for (city in civ.cities) {
-            if (city.cityConstructions.currentConstructionName().isNotEmpty()) continue
+            val current = city.cityConstructions.currentConstructionName()
+            val buildingInProgress = current.isNotEmpty() &&
+                city.getRuleset().buildings.containsKey(current)
+            // A city already producing a unit keeps it. A city producing a building is switched
+            // over while the army is below target: defenders matter more than another monument.
+            if (current.isNotEmpty() && !(deficit > 0 && buildingInProgress)) continue
             try {
-                val picked = if (needsTroops) pickMilitaryUnit(city) else null
+                // Build troops until the target is met; afterwards let growth and infrastructure
+                // take over so the empire does not stall.
+                val picked = if (deficit > 0) pickMilitaryUnit(city) else null
                 if (picked != null) {
                     city.cityConstructions.setCurrentConstruction(picked)
-                    applied += "${city.name} 建造 $picked"
+                    applied += "${city.name} 建造 ${picked.tr()}"
+                    deficit--
                 } else {
                     city.cityConstructions.chooseNextConstruction()
                     applied += "${city.name} 自动选择生产"

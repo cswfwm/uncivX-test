@@ -18,6 +18,14 @@ object ReleaseNotes {
     /** Newest first. Keep this in sync with CHANGELOG-CN-X.md when releasing. */
     val changelog: List<Entry> = listOf(
         Entry(
+            "1.1.2", "2026-11-05",
+            listOf(
+                "AI 更主动造兵：目标兵力提升为每城 2 个，开战时额外加 3 个",
+                "AI 在兵力不足时会把正在造建筑的城改为造兵",
+                "提示词明确要求优先保证防守兵力，达标后才造建筑"
+            )
+        ),
+        Entry(
             "1.1.1", "2026-11-03",
             listOf(
                 "新增关于页：显示版本、日期与内置更新日志",
