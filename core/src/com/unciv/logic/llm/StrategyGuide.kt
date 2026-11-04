@@ -115,8 +115,7 @@ object StrategyGuide {
 
     /** Diplomacy doctrine, always included: the game rewards trading and punishes blind aggression. */
     val diplomacyDoctrine: String =
-        "外交原则：
-" +
+        "外交原则：\n" +
             "- 交易时先判断对方是否急需，急需的物品可以抬价；和平时期多签订开放边界、研究协定，" +
             "这些长期收益高于一次性金币。\n" +
             "- 每一笔交易都要保证自己不亏：用富余的奢侈品换对方稀缺资源，避免用战略资源换金币。\n" +
@@ -124,7 +123,7 @@ object StrategyGuide {
             "- 盟友价值会随局势变化：当盟友变弱或占住你需要的土地时，可以结束同盟，但不要在" +
             "自己兵力不足时翻脸。\n" +
             "- 背叛要有收益：只有在能实际拿到城市、资源或决定性优势时才考虑背弃协议，" +
-            "否则损失的外交信誉会拖累整局。"
+            "否则损失的外交信誉会拖累整局。\n"
 
     /** Rules matching this turn, in priority order. */
     fun adviceFor(civ: Civilization): List<String> {
