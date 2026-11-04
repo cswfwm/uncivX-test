@@ -42,9 +42,10 @@ jobs:
         run: |
           mkdir -p release
           VERSION=$(grep -oP 'appVersion = "\K[^"]+' buildSrc/src/main/kotlin/BuildConfig.kt)
+          BUILD=$(grep -oP 'appCodeNumber = \K[0-9]+' buildSrc/src/main/kotlin/BuildConfig.kt)
           TAG="V${VERSION}"
-          STAMP=$(date -u +%Y%m%d-%H%M)
-          OUT="release/uncivCN-X-${TAG}-${STAMP}.apk"
+          # Naming: software name + version + build number, e.g. uncivCN-X_1.1.1_1003.apk
+          OUT="release/uncivCN-X_${VERSION}_${BUILD}.apk"
           cp android/build/outputs/apk/release/*.apk "$OUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"

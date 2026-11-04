@@ -368,6 +368,8 @@ object GithubAPI {
         var tag_name = ""
         var html_url = ""
         var name = ""
+        /** Release notes written when the release is published - shown in the update dialog. */
+        var body = ""
         var assets = ArrayList<ReleaseAsset>()
 
         /**
